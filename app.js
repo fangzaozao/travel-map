@@ -9,6 +9,7 @@ const zoomInBtn = document.getElementById("zoom-in");
 const zoomOutBtn = document.getElementById("zoom-out");
 const zoomResetBtn = document.getElementById("zoom-reset");
 const tabWorld = document.getElementById("tab-world");
+const tabCities = document.getElementById("tab-cities");
 const tabChina = document.getElementById("tab-china");
 const countVisited = document.getElementById("count-visited");
 const countTotal = document.getElementById("count-total");
@@ -22,32 +23,42 @@ const mapWrap = document.querySelector(".map-wrap");
 
 const DEFAULT_MATCH_KEYS = {
   world: "name",
-  china: "shapeName",
+  worldCities: "name",
+  china: "name",
 };
 
 const BUILTIN_FILES = {
   world: "data/world.geojson",
-  china: "data/china_adm3.geojson",
+  worldCities: "data/world_cities.geojson",
+  china: [
+    "data/china_adm3.geojson",
+    "data/taiwan_adm2.geojson",
+    "data/hk_mac_subunits.geojson",
+  ],
 };
 
 const VIEW_KEYS = {
   world: "travel-map-world",
+  worldCities: "travel-map-world-cities",
   china: "travel-map-china",
 };
 
 let activeView = "world";
 let geojsonCache = {
   world: null,
+  worldCities: null,
   china: null,
 };
 let isLoading = {
   world: false,
+  worldCities: false,
   china: false,
 };
 let featureIndex = new Map();
 let featureList = [];
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
+  worldCities: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
 };
 let isPanning = false;
@@ -56,9 +67,15 @@ let panStart = null;
 function setActiveTab(view) {
   activeView = view;
   tabWorld.classList.toggle("active", view === "world");
+  tabCities.classList.toggle("active", view === "worldCities");
   tabChina.classList.toggle("active", view === "china");
   matchKeyInput.value = DEFAULT_MATCH_KEYS[view];
-  statTitle.textContent = view === "world" ? "世界视图" : "中国县级市";
+  const titleMap = {
+    world: "\u4e16\u754c\u56fd\u5bb6",
+    worldCities: "\u4e16\u754c\u57ce\u5e02",
+    china: "\u4e2d\u56fd\u53bf\u7ea7\u5e02",
+  };
+  statTitle.textContent = titleMap[view] || "";
   loadBuiltin(view);
   render();
 }
@@ -120,7 +137,8 @@ function render() {
   let total = 0;
   for (const feature of features) {
     if (!feature.geometry) continue;
-    const name = feature.properties?.[matchKey];
+    normalizeFeatureName(feature);
+    const name = feature.properties?.[matchKey] || feature.properties?.name;
     const pathData = geometryToPath(feature.geometry, bounds, scale, viewBox);
     if (!pathData) continue;
 
@@ -343,10 +361,23 @@ async function loadBuiltin(view) {
   if (geojsonCache[view] || isLoading[view]) return;
   isLoading[view] = true;
   try {
-    const response = await fetch(BUILTIN_FILES[view], { cache: "no-store" });
-    if (!response.ok) return;
-    const geojson = await response.json();
-    geojsonCache[view] = geojson;
+    const fileDef = BUILTIN_FILES[view];
+    if (Array.isArray(fileDef)) {
+      const collections = [];
+      for (const url of fileDef) {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) continue;
+        collections.push(await response.json());
+      }
+      if (collections.length > 0) {
+        geojsonCache[view] = mergeCollections(collections);
+      }
+    } else {
+      const response = await fetch(fileDef, { cache: "no-store" });
+      if (!response.ok) return;
+      const geojson = await response.json();
+      geojsonCache[view] = geojson;
+    }
     if (activeView === view) render();
   } catch {
     // Ignore fetch errors; user can still import manually.
@@ -361,6 +392,7 @@ fileInput.addEventListener("change", (event) => {
 });
 
 tabWorld.addEventListener("click", () => setActiveTab("world"));
+tabCities.addEventListener("click", () => setActiveTab("worldCities"));
 tabChina.addEventListener("click", () => setActiveTab("china"));
 exportBtn.addEventListener("click", exportVisited);
 clearBtn.addEventListener("click", clearVisited);
@@ -417,7 +449,8 @@ function handleSearch() {
     const geojson = geojsonCache[activeView];
     if (geojson?.features) {
       for (const feature of geojson.features) {
-        const value = feature.properties?.[matchKey];
+        normalizeFeatureName(feature);
+        const value = feature.properties?.[matchKey] || feature.properties?.name;
         if (value && value.toString().includes(query)) {
           target = featureIndex.get(value) || featureIndex.get(value.toLowerCase());
           if (target) break;
@@ -503,6 +536,35 @@ function renderSearchResults() {
 
     searchResults.appendChild(row);
   }
+}
+
+function normalizeFeatureName(feature) {
+  if (!feature.properties) feature.properties = {};
+  if (feature.properties.name) return;
+  const fallback =
+    feature.properties.shapeName ||
+    feature.properties.NAME ||
+    feature.properties.NAME_EN ||
+    feature.properties.name_en ||
+    feature.properties.admin ||
+    feature.properties.NAME_LONG ||
+    feature.properties.NAME_LOCAL;
+  if (fallback) feature.properties.name = fallback;
+}
+
+function mergeCollections(collections) {
+  const merged = {
+    type: "FeatureCollection",
+    features: [],
+  };
+  for (const collection of collections) {
+    if (collection?.features?.length) {
+      merged.features.push(...collection.features);
+    } else if (collection?.type === "Feature") {
+      merged.features.push(collection);
+    }
+  }
+  return merged;
 }
 
 function computeProjectedBounds(feature, bounds, scale, viewBox) {
