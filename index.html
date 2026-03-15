@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Travel Map | 点亮我的足迹</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero">
+        <div class="hero-text">
+          <p class="kicker">Travel Map</p>
+          <h1>点亮我的足迹</h1>
+          <p class="sub">
+            世界范围点亮访问过的地区，中国范围支持到县级市。支持导入 GeoJSON，
+            点击地图即可标记已去过。
+          </p>
+        </div>
+        <div class="hero-panel">
+          <div class="panel">
+            <div class="panel-row">
+              <label class="label">当前视图</label>
+              <div class="segmented" role="tablist" aria-label="Map View">
+                <button id="tab-world" class="segmented-btn active" type="button">世界</button>
+                <button id="tab-china" class="segmented-btn" type="button">中国县级市</button>
+              </div>
+            </div>
+            <div class="panel-row">
+              <label class="label">匹配字段</label>
+              <input id="match-key" class="input" value="name" />
+              <small class="hint">用于识别地区名称的 GeoJSON 属性名，例如 name, NAME, NAME_2</small>
+            </div>
+            <div class="panel-row">
+              <label class="label">导入数据</label>
+              <input id="file-input" class="input-file" type="file" accept=".geojson,.json" />
+              <small class="hint">建议使用 EPSG:4326（经纬度）格式的 GeoJSON</small>
+            </div>
+            <div class="panel-row">
+              <label class="label">搜索点亮</label>
+              <div class="inline">
+                <input id="search-input" class="input" placeholder="输入县级市或国家名" />
+                <button id="search-btn" class="btn small" type="button">标记</button>
+              </div>
+              <small class="hint">按匹配字段进行搜索，支持中文名称</small>
+            </div>
+            <div class="panel-row">
+              <label class="label">搜索结果</label>
+              <div id="search-results" class="results">
+                <div class="results-empty">暂无结果</div>
+              </div>
+              <small class="hint">点击结果可点亮或取消，最多显示 20 条</small>
+            </div>
+            <div class="panel-row">
+              <label class="label">缩放</label>
+              <div class="inline">
+                <button id="zoom-in" class="btn ghost small" type="button">放大</button>
+                <button id="zoom-out" class="btn ghost small" type="button">缩小</button>
+                <button id="zoom-reset" class="btn ghost small" type="button">重置</button>
+              </div>
+              <small class="hint">鼠标滚轮缩放，拖拽平移</small>
+            </div>
+            <div class="panel-row">
+              <label class="label">已点亮统计</label>
+              <div class="stat-card" id="stat-card">
+                <div class="stat-title" id="stat-title">世界视图</div>
+                <div class="stat-main">
+                  <span id="count-visited">0</span>
+                  <span class="stat-sep">/</span>
+                  <span id="count-total">0</span>
+                </div>
+                <div class="progress">
+                  <div class="progress-track">
+                    <div id="progress-fill" class="progress-fill"></div>
+                  </div>
+                  <div id="progress-label" class="progress-label">0%</div>
+                </div>
+              </div>
+            </div>
+            <div class="panel-row">
+              <button id="export-btn" class="btn" type="button">导出已点亮清单</button>
+              <button id="clear-btn" class="btn ghost" type="button">清空当前视图</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="map-area">
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-text">
+            <strong>拖入 GeoJSON 文件</strong>
+            <span>或使用右侧面板导入</span>
+          </div>
+        </div>
+        <div class="map-wrap">
+          <svg id="map-svg" viewBox="0 0 1000 600" role="img" aria-label="Travel Map"></svg>
+          <div id="map-empty" class="map-empty">
+            <p>还没有加载地图数据</p>
+            <p>请导入世界或中国县级市的 GeoJSON 文件</p>
+          </div>
+        </div>
+      </main>
+
+      <section class="notes">
+        <h2>准备数据</h2>
+        <p>
+          你可以在 data/README.md 中看到建议的数据来源和字段说明。加载后，点击地区即可点亮，再次点击会取消。
+          所有记录将保存在浏览器本地。
+        </p>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
