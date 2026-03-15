@@ -9,7 +9,6 @@ const zoomInBtn = document.getElementById("zoom-in");
 const zoomOutBtn = document.getElementById("zoom-out");
 const zoomResetBtn = document.getElementById("zoom-reset");
 const tabWorld = document.getElementById("tab-world");
-const tabCities = document.getElementById("tab-cities");
 const tabChina = document.getElementById("tab-china");
 const countVisited = document.getElementById("count-visited");
 const countTotal = document.getElementById("count-total");
@@ -23,13 +22,11 @@ const mapWrap = document.querySelector(".map-wrap");
 
 const DEFAULT_MATCH_KEYS = {
   world: "name",
-  worldCities: "name",
   china: "name",
 };
 
 const BUILTIN_FILES = {
-  world: "data/world.geojson",
-  worldCities: "data/world_cities.geojson",
+  world: "data/world_cities.geojson",
   china: [
     "data/china_adm3.geojson",
     "data/taiwan_adm2.geojson",
@@ -39,26 +36,64 @@ const BUILTIN_FILES = {
 
 const VIEW_KEYS = {
   world: "travel-map-world",
-  worldCities: "travel-map-world-cities",
   china: "travel-map-china",
 };
+
+const ALIAS_PAIRS = [
+  ["Hong Kong", "\u9999\u6e2f"],
+  ["Macau", "\u6fb3\u95e8"],
+  ["Taipei", "\u53f0\u5317"],
+  ["Taichung", "\u53f0\u4e2d"],
+  ["Kaohsiung", "\u9ad8\u96c4"],
+  ["Pattaya", "\u82ad\u63d0\u96c5"],
+  ["Bangkok", "\u66fc\u8c37"],
+  ["Beijing", "\u5317\u4eac"],
+  ["Shanghai", "\u4e0a\u6d77"],
+  ["Guangzhou", "\u5e7f\u5dde"],
+  ["Shenzhen", "\u6df1\u5733"],
+  ["Chongqing", "\u91cd\u5e86"],
+  ["Tianjin", "\u5929\u6d25"],
+];
+
+const ALIAS_MAP = new Map();
+for (const [a, b] of ALIAS_PAIRS) {
+  ALIAS_MAP.set(a, b);
+  ALIAS_MAP.set(b, a);
+}
+
+const ZH_KEYS = [
+  "name_zh",
+  "name_zhcn",
+  "name_zho",
+  "name_zhhans",
+  "name_zhhant",
+  "name_zh-cn",
+  "name_zh-hans",
+  "name_zh-hant",
+  "NAME_ZH",
+  "NAME_ZH_CN",
+  "NAME_ZH_HANS",
+  "NAME_ZH_HANT",
+  "NAME_ZH_HANS_CN",
+  "NAME_ZH_HANT_TW",
+  "chinese",
+  "CHINESE",
+];
 
 let activeView = "world";
 let geojsonCache = {
   world: null,
-  worldCities: null,
   china: null,
 };
 let isLoading = {
   world: false,
-  worldCities: false,
   china: false,
 };
 let featureIndex = new Map();
+let searchIndex = new Map();
 let featureList = [];
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
-  worldCities: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
 };
 let isPanning = false;
@@ -67,12 +102,10 @@ let panStart = null;
 function setActiveTab(view) {
   activeView = view;
   tabWorld.classList.toggle("active", view === "world");
-  tabCities.classList.toggle("active", view === "worldCities");
   tabChina.classList.toggle("active", view === "china");
   matchKeyInput.value = DEFAULT_MATCH_KEYS[view];
   const titleMap = {
-    world: "\u4e16\u754c\u56fd\u5bb6",
-    worldCities: "\u4e16\u754c\u57ce\u5e02",
+    world: "\u4e16\u754c\u5730\u533a",
     china: "\u4e2d\u56fd\u53bf\u7ea7\u5e02",
   };
   statTitle.textContent = titleMap[view] || "";
@@ -119,6 +152,7 @@ function render() {
   const geojson = geojsonCache[activeView];
   clearSvg();
   featureIndex = new Map();
+  searchIndex = new Map();
   featureList = [];
   if (!geojson) {
     emptyState.style.display = "grid";
@@ -167,9 +201,14 @@ function render() {
 
     svg.appendChild(path);
     if (name) {
+      const aliases = collectAliases(feature, name);
       featureIndex.set(name, path);
       featureIndex.set(name.toLowerCase(), path);
-      featureList.push({ name, path });
+      featureList.push({ name, path, aliases });
+      for (const alias of aliases) {
+        const key = normalizeKey(alias);
+        if (key) searchIndex.set(key, path);
+      }
     }
   }
 
@@ -351,7 +390,7 @@ function handleFile(file) {
       loadGeoJSONForActiveView(geojson);
       resetViewBox();
     } catch {
-      alert("文件解析失败，请确认是合法的 GeoJSON。");
+      alert("\u6587\u4ef6\u89e3\u6790\u5931\u8d25\uff0c\u8bf7\u786e\u8ba4\u662f\u5408\u6cd5\u7684 GeoJSON\u3002");
     }
   };
   reader.readAsText(file);
@@ -392,7 +431,6 @@ fileInput.addEventListener("change", (event) => {
 });
 
 tabWorld.addEventListener("click", () => setActiveTab("world"));
-tabCities.addEventListener("click", () => setActiveTab("worldCities"));
 tabChina.addEventListener("click", () => setActiveTab("china"));
 exportBtn.addEventListener("click", exportVisited);
 clearBtn.addEventListener("click", clearVisited);
@@ -438,7 +476,7 @@ function zoom(factor, originX, originY) {
   applyViewBox();
 }
 
-function handleSearch() {
+function handleSearchLegacy() {
   const query = searchInput.value.trim();
   if (!query) return;
   const matchKey = normalizeMatchKey();
@@ -487,7 +525,47 @@ function handleSearch() {
   setTimeout(() => target.classList.remove("flash"), 900);
 }
 
-function renderSearchResults() {
+function handleSearch() {
+  const query = searchInput.value.trim();
+  if (!query) return;
+  const normalized = normalizeKey(query);
+  let target = searchIndex.get(normalized);
+  if (!target) {
+    const match = featureList.find((item) =>
+      item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
+    );
+    target = match?.path;
+  }
+
+  if (!target) {
+    alert("\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u540d\u79f0\uff0c\u8bf7\u68c0\u67e5\u5339\u914d\u5b57\u6bb5\u3002");
+    return;
+  }
+
+  const id = target.dataset.name;
+  const visitedSet = getVisitedSet();
+  if (visitedSet.has(id)) {
+    visitedSet.delete(id);
+    target.classList.remove("visited");
+  } else {
+    visitedSet.add(id);
+    target.classList.add("visited");
+  }
+  setVisitedSet(visitedSet);
+  updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
+
+  const bbox = JSON.parse(target.dataset.bbox || "{}");
+  if (bbox && Number.isFinite(bbox.minX)) {
+    const centerX = (bbox.minX + bbox.maxX) / 2;
+    const centerY = (bbox.minY + bbox.maxY) / 2;
+    zoom(1.6, centerX, centerY);
+  }
+
+  target.classList.add("flash");
+  setTimeout(() => target.classList.remove("flash"), 900);
+}
+
+function renderSearchResultsLegacy() {
   const query = searchInput.value.trim();
   searchResults.innerHTML = "";
   if (!query) {
@@ -538,6 +616,63 @@ function renderSearchResults() {
   }
 }
 
+function renderSearchResults() {
+  const query = searchInput.value.trim();
+  searchResults.innerHTML = "";
+  if (!query) {
+    const empty = document.createElement("div");
+    empty.className = "results-empty";
+    empty.textContent = "\u6682\u65e0\u7ed3\u679c";
+    searchResults.appendChild(empty);
+    return;
+  }
+
+  const visitedSet = getVisitedSet();
+  const normalized = normalizeKey(query);
+  const matches = featureList
+    .filter((item) => item.aliases.some((alias) => normalizeKey(alias).includes(normalized)))
+    .slice(0, 20);
+
+  if (matches.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "results-empty";
+    empty.textContent = "\u6682\u65e0\u7ed3\u679c";
+    searchResults.appendChild(empty);
+    return;
+  }
+
+  for (const item of matches) {
+    const row = document.createElement("div");
+    row.className = "result-item";
+    if (visitedSet.has(item.name)) row.classList.add("active");
+
+    const label = document.createElement("span");
+    label.className = "result-name";
+    const matchedAlias = item.aliases.find((alias) =>
+      normalizeKey(alias).includes(normalized)
+    );
+    label.textContent =
+      matchedAlias && matchedAlias !== item.name ? `${item.name} - ${matchedAlias}` : item.name;
+
+    const tag = document.createElement("span");
+    tag.className = "result-tag";
+    tag.textContent = visitedSet.has(item.name)
+      ? "\u5df2\u70b9\u4eae"
+      : "\u672a\u70b9\u4eae";
+
+    row.appendChild(label);
+    row.appendChild(tag);
+
+    row.addEventListener("click", () => {
+      searchInput.value = item.name;
+      handleSearch();
+      renderSearchResults();
+    });
+
+    searchResults.appendChild(row);
+  }
+}
+
 function normalizeFeatureName(feature) {
   if (!feature.properties) feature.properties = {};
   if (feature.properties.name) return;
@@ -565,6 +700,50 @@ function mergeCollections(collections) {
     }
   }
   return merged;
+}
+
+function normalizeKey(value) {
+  if (!value) return "";
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[\\s\\u00A0]+/g, "")
+    .replace(/[\\-_.'"]/g, "");
+}
+
+function collectAliases(feature, name) {
+  const aliases = new Set();
+  if (name) aliases.add(name);
+  const props = feature.properties || {};
+  const maybeKeys = [
+    "name",
+    "nameascii",
+    "name_alt",
+    "namealt",
+    "name_en",
+    "NAME",
+    "NAME_EN",
+    "NAME_LONG",
+    "NAME_LOCAL",
+    "shapeName",
+  ];
+  for (const key of maybeKeys) {
+    if (props[key]) aliases.add(props[key]);
+  }
+  for (const key of ZH_KEYS) {
+    if (props[key]) aliases.add(props[key]);
+  }
+  for (const [k, v] of Object.entries(props)) {
+    if (typeof v === "string" && /zh|chinese/i.test(k)) {
+      aliases.add(v);
+    }
+  }
+  for (const item of [...aliases]) {
+    const mapped = ALIAS_MAP.get(item);
+    if (mapped) aliases.add(mapped);
+  }
+  return [...aliases].filter(Boolean);
 }
 
 function computeProjectedBounds(feature, bounds, scale, viewBox) {
