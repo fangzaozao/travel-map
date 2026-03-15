@@ -26,7 +26,7 @@ const DEFAULT_MATCH_KEYS = {
 };
 
 const BUILTIN_FILES = {
-  world: "data/world_cities.geojson",
+  world: "data/world.geojson",
   china: [
     "data/china_adm3.geojson",
     "data/taiwan_adm2.geojson",
@@ -43,8 +43,14 @@ const ALIAS_PAIRS = [
   ["Hong Kong", "\u9999\u6e2f"],
   ["Macau", "\u6fb3\u95e8"],
   ["Taipei", "\u53f0\u5317"],
+  ["Taipei City", "\u53f0\u5317"],
+  ["Taibei", "\u53f0\u5317"],
   ["Taichung", "\u53f0\u4e2d"],
+  ["Taichung City", "\u53f0\u4e2d"],
+  ["Taizhong", "\u53f0\u4e2d"],
   ["Kaohsiung", "\u9ad8\u96c4"],
+  ["Kaohsiung City", "\u9ad8\u96c4"],
+  ["Gaoxiong", "\u9ad8\u96c4"],
   ["Pattaya", "\u82ad\u63d0\u96c5"],
   ["Bangkok", "\u66fc\u8c37"],
   ["Beijing", "\u5317\u4eac"],
