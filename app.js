@@ -69,7 +69,7 @@ for (const [a, b] of ALIAS_PAIRS) {
   ALIAS_MAP.set(b, a);
 }
 
-const DATA_VERSION = "20260316-5";
+const DATA_VERSION = "20260316-6";
 
 const ZH_KEYS = [
   "name_zh",
@@ -114,6 +114,7 @@ let renderToken = 0;
 let searchDebounceTimer = null;
 let worldIndexReady = false;
 let worldIndexTask = null;
+let worldCitiesLoading = false;
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
@@ -187,7 +188,7 @@ function render() {
   worldIndexTask = null;
   setRenderStatus("", false);
   if (activeView === "world") {
-    if (!geojsonCache.worldOutline || !geojsonCache.worldCities) {
+    if (!geojsonCache.worldOutline) {
       emptyState.style.display = "grid";
       updateStats(0, 0);
       loadBuiltin(activeView);
@@ -221,6 +222,9 @@ function render() {
       path.classList.add("map-outline");
       svg.appendChild(path);
     }
+    if (!geojsonCache.worldCities) {
+      setRenderStatus("世界城市未加载，搜索时自动加载", true);
+    }
   } else {
     const normalized = normalizeGeoJSON(geojsonCache[activeView]);
     bounds = normalized.bounds;
@@ -231,7 +235,9 @@ function render() {
   let total = 0;
   const activeFeatures =
     activeView === "world"
-      ? normalizeGeoJSON(geojsonCache.worldCities).features
+      ? geojsonCache.worldCities
+        ? normalizeGeoJSON(geojsonCache.worldCities).features
+        : []
       : normalizeGeoJSON(geojsonCache[activeView]).features;
 
   if (activeView !== "world") {
@@ -282,6 +288,13 @@ function render() {
     requestAnimationFrame(step);
   } else {
     const totalFeatures = activeFeatures.length;
+    if (totalFeatures === 0) {
+      updateStats(0, visited.size);
+      if (!worldCitiesLoading) {
+        deferLoadWorldCities();
+      }
+      return;
+    }
     let index = 0;
     worldIndexTask = () => {
       if (token !== renderToken) return;
@@ -522,7 +535,7 @@ function handleFile(file) {
 
 async function loadBuiltin(view) {
   if (view === "world") {
-    await Promise.all([loadSingle("worldOutline"), loadSingle("worldCities")]);
+    await loadSingle("worldOutline");
     if (activeView === "world") render();
     return;
   }
@@ -555,6 +568,24 @@ async function loadSingle(key) {
     // Ignore fetch errors; user can still import manually.
   } finally {
     isLoading[key] = false;
+  }
+}
+
+function deferLoadWorldCities() {
+  worldCitiesLoading = true;
+  const runner = () => {
+    loadSingle("worldCities").then(() => {
+      worldCitiesLoading = false;
+      if (activeView === "world") {
+        worldIndexReady = false;
+        render();
+      }
+    });
+  };
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(runner, { timeout: 2000 });
+  } else {
+    window.setTimeout(runner, 600);
   }
 }
 
@@ -662,7 +693,12 @@ function handleSearch() {
   const query = searchInput.value.trim();
   if (!query) return;
   if (activeView === "world" && !worldIndexReady) {
-    setRenderStatus("\u4e16\u754c\u57ce\u5e02\u7d22\u5f15\u4e2d\uff0c\u8bf7\u7a0d\u7b49\u2026\u2026", true);
+    if (!geojsonCache.worldCities) {
+      setRenderStatus("加载世界城市中，请稍等...", true);
+      if (!worldCitiesLoading) deferLoadWorldCities();
+    } else {
+      setRenderStatus("\u4e16\u754c\u57ce\u5e02\u7d22\u5f15\u4e2d\uff0c\u8bf7\u7a0d\u7b49\u2026\u2026", true);
+    }
     return;
   }
   const normalized = normalizeKey(query);
