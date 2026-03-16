@@ -69,7 +69,7 @@ for (const [a, b] of ALIAS_PAIRS) {
   ALIAS_MAP.set(b, a);
 }
 
-const DATA_VERSION = "20260316-4";
+const DATA_VERSION = "20260316-5";
 
 const ZH_KEYS = [
   "name_zh",
@@ -112,6 +112,8 @@ let renderState = {
 };
 let renderToken = 0;
 let searchDebounceTimer = null;
+let worldIndexReady = false;
+let worldIndexTask = null;
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
@@ -181,6 +183,8 @@ function render() {
   featureList = [];
   featurePathMap = new Map();
   featureMetaMap = new Map();
+  worldIndexReady = false;
+  worldIndexTask = null;
   setRenderStatus("", false);
   if (activeView === "world") {
     if (!geojsonCache.worldOutline || !geojsonCache.worldCities) {
@@ -277,23 +281,45 @@ function render() {
     setRenderStatus(`加载中 0/${totalFeatures}`, true);
     requestAnimationFrame(step);
   } else {
-    for (const feature of activeFeatures) {
-      if (!feature.geometry) continue;
-      normalizeFeatureName(feature);
-      const name = feature.properties?.[matchKey] || feature.properties?.name;
-      if (!name) continue;
+    const totalFeatures = activeFeatures.length;
+    let index = 0;
+    worldIndexTask = () => {
+      if (token !== renderToken) return;
+      let added = 0;
+      while (index < totalFeatures && added < 400) {
+        const feature = activeFeatures[index];
+        index += 1;
+        if (!feature.geometry) continue;
+        normalizeFeatureName(feature);
+        const name = feature.properties?.[matchKey] || feature.properties?.name;
+        if (!name) continue;
 
-      total += 1;
-      const aliases = collectAliases(feature, name);
-      const meta = { name, feature, pathData: null, bbox: null };
-      featureMetaMap.set(name, meta);
-      featureList.push({ name, aliases });
+        total += 1;
+        const aliases = collectAliases(feature, name);
+        const meta = { name, feature, pathData: null, bbox: null };
+        featureMetaMap.set(name, meta);
+        featureList.push({ name, aliases });
 
-      for (const alias of aliases) {
-        const key = normalizeKey(alias);
-        if (key) searchIndex.set(key, name);
+        for (const alias of aliases) {
+          const key = normalizeKey(alias);
+          if (key) searchIndex.set(key, name);
+        }
+        added += 1;
       }
-    }
+
+      updateStats(total, visited.size);
+      if (index < totalFeatures) {
+        setRenderStatus(`索引中 ${index}/${totalFeatures}`, true);
+        requestAnimationFrame(worldIndexTask);
+      } else {
+        worldIndexReady = true;
+        setRenderStatus("", false);
+        renderSearchResults();
+      }
+    };
+
+    setRenderStatus(`索引中 0/${totalFeatures}`, true);
+    requestAnimationFrame(worldIndexTask);
   }
 
   if (activeView === "world") {
@@ -310,7 +336,7 @@ function render() {
 
   applyViewBox();
   updateStats(total, visited.size);
-  if (activeView === "world") {
+  if (activeView === "world" && worldIndexReady) {
     renderSearchResults();
   }
 }
@@ -635,6 +661,10 @@ function handleSearchLegacy() {
 function handleSearch() {
   const query = searchInput.value.trim();
   if (!query) return;
+  if (activeView === "world" && !worldIndexReady) {
+    setRenderStatus("\u4e16\u754c\u57ce\u5e02\u7d22\u5f15\u4e2d\uff0c\u8bf7\u7a0d\u7b49\u2026\u2026", true);
+    return;
+  }
   const normalized = normalizeKey(query);
   let name = searchIndex.get(normalized);
   if (!name) {
@@ -730,6 +760,14 @@ function renderSearchResultsLegacy() {
 }
 
 function renderSearchResults() {
+  if (activeView === "world" && !worldIndexReady) {
+    searchResults.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "results-empty";
+    empty.textContent = "\u6b63\u5728\u7d22\u5f15\u4e16\u754c\u57ce\u5e02\u2026\u2026";
+    searchResults.appendChild(empty);
+    return;
+  }
   const query = searchInput.value.trim();
   searchResults.innerHTML = "";
   if (!query) {
