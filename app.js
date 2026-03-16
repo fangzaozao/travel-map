@@ -105,6 +105,10 @@ let searchIndex = new Map();
 let featureList = [];
 let featurePathMap = new Map();
 let featureMetaMap = new Map();
+let renderState = {
+  world: null,
+  china: null,
+};
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
@@ -197,6 +201,7 @@ function render() {
     const outline = normalizeGeoJSON(geojsonCache.worldOutline);
     bounds = outline.bounds;
     scale = computeScale(bounds, viewBox);
+    renderState.world = { bounds, scale, viewBox };
     for (const feature of outline.features) {
       if (!feature.geometry) continue;
       const pathData = geometryToPath(feature.geometry, bounds, scale, viewBox);
@@ -210,6 +215,7 @@ function render() {
     const normalized = normalizeGeoJSON(geojsonCache[activeView]);
     bounds = normalized.bounds;
     scale = computeScale(bounds, viewBox);
+    renderState[activeView] = { bounds, scale, viewBox };
   }
 
   let total = 0;
@@ -226,7 +232,10 @@ function render() {
 
     total += 1;
     const aliases = collectAliases(feature, name);
-    const meta = buildFeatureMeta(feature, name, bounds, scale, viewBox);
+    const meta =
+      activeView === "world"
+        ? { name, feature, pathData: null, bbox: null }
+        : buildFeatureMeta(feature, name, bounds, scale, viewBox);
     featureMetaMap.set(name, meta);
     featureList.push({ name, aliases });
 
@@ -772,15 +781,16 @@ function buildFeatureMeta(feature, name, bounds, scale, viewBox) {
 }
 
 function createFeaturePath(meta, { isCity }) {
+  const hydrated = hydrateMeta(meta, isCity ? "world" : activeView);
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", meta.pathData);
+  path.setAttribute("d", hydrated.pathData);
   path.classList.add("map-path");
   if (isCity) path.classList.add("map-city");
-  path.dataset.name = meta.name;
-  path.dataset.bbox = JSON.stringify(meta.bbox);
+  path.dataset.name = hydrated.name;
+  path.dataset.bbox = JSON.stringify(hydrated.bbox);
 
   path.addEventListener("click", () => {
-    const id = meta.name;
+    const id = hydrated.name;
     const visitedSet = getVisitedSet();
     if (visitedSet.has(id)) {
       visitedSet.delete(id);
@@ -805,6 +815,22 @@ function ensureFeaturePath(name, isCity) {
   featurePathMap.set(name, path);
   svg.appendChild(path);
   return path;
+}
+
+function hydrateMeta(meta, viewKey) {
+  if (meta.pathData && meta.bbox) return meta;
+  const state = renderState[viewKey];
+  if (!state) return meta;
+  const pathData = geometryToPath(meta.feature.geometry, state.bounds, state.scale, state.viewBox);
+  const bbox = computeProjectedBounds(
+    meta.feature,
+    state.bounds,
+    state.scale,
+    state.viewBox
+  );
+  meta.pathData = pathData;
+  meta.bbox = bbox;
+  return meta;
 }
 
 function normalizeKey(value) {
