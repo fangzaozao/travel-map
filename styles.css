@@ -270,6 +270,18 @@ body {
   transition: fill 0.15s ease;
 }
 
+.map-outline {
+  fill: var(--land);
+  stroke: var(--stroke);
+  stroke-width: 0.6;
+}
+
+.map-city {
+  fill: #fff;
+  stroke: var(--stroke);
+  stroke-width: 0.6;
+}
+
 .map-path.visited {
   fill: var(--visited);
   stroke: #b64734;

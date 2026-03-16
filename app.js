@@ -26,7 +26,8 @@ const DEFAULT_MATCH_KEYS = {
 };
 
 const BUILTIN_FILES = {
-  world: "data/world.geojson",
+  worldOutline: "data/world.geojson",
+  worldCities: "data/world_cities.geojson",
   china: [
     "data/china_adm3.geojson",
     "data/taiwan_adm1.geojson",
@@ -88,11 +89,13 @@ const ZH_KEYS = [
 
 let activeView = "world";
 let geojsonCache = {
-  world: null,
+  worldOutline: null,
+  worldCities: null,
   china: null,
 };
 let isLoading = {
-  world: false,
+  worldOutline: false,
+  worldCities: false,
   china: false,
 };
 let featureIndex = new Map();
@@ -150,17 +153,27 @@ function normalizeMatchKey() {
 }
 
 function loadGeoJSONForActiveView(geojson) {
-  geojsonCache[activeView] = geojson;
+  if (activeView === "world") {
+    geojsonCache.worldCities = geojson;
+  } else {
+    geojsonCache[activeView] = geojson;
+  }
   render();
 }
 
 function render() {
-  const geojson = geojsonCache[activeView];
   clearSvg();
   featureIndex = new Map();
   searchIndex = new Map();
   featureList = [];
-  if (!geojson) {
+  if (activeView === "world") {
+    if (!geojsonCache.worldOutline || !geojsonCache.worldCities) {
+      emptyState.style.display = "grid";
+      updateStats(0, 0);
+      loadBuiltin(activeView);
+      return;
+    }
+  } else if (!geojsonCache[activeView]) {
     emptyState.style.display = "grid";
     updateStats(0, 0);
     loadBuiltin(activeView);
@@ -170,12 +183,36 @@ function render() {
   emptyState.style.display = "none";
   const matchKey = normalizeMatchKey();
   const visited = getVisitedSet();
-  const { features, bounds } = normalizeGeoJSON(geojson);
   const viewBox = { width: 1000, height: 600 };
-  const scale = computeScale(bounds, viewBox);
+  let bounds;
+  let scale;
+
+  if (activeView === "world") {
+    const outline = normalizeGeoJSON(geojsonCache.worldOutline);
+    bounds = outline.bounds;
+    scale = computeScale(bounds, viewBox);
+    for (const feature of outline.features) {
+      if (!feature.geometry) continue;
+      const pathData = geometryToPath(feature.geometry, bounds, scale, viewBox);
+      if (!pathData) continue;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", pathData);
+      path.classList.add("map-outline");
+      svg.appendChild(path);
+    }
+  } else {
+    const normalized = normalizeGeoJSON(geojsonCache[activeView]);
+    bounds = normalized.bounds;
+    scale = computeScale(bounds, viewBox);
+  }
 
   let total = 0;
-  for (const feature of features) {
+  const activeFeatures =
+    activeView === "world"
+      ? normalizeGeoJSON(geojsonCache.worldCities).features
+      : normalizeGeoJSON(geojsonCache[activeView]).features;
+
+  for (const feature of activeFeatures) {
     if (!feature.geometry) continue;
     normalizeFeatureName(feature);
     const name = feature.properties?.[matchKey] || feature.properties?.name;
@@ -186,6 +223,7 @@ function render() {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", pathData);
     path.classList.add("map-path");
+    if (activeView === "world") path.classList.add("map-city");
     path.dataset.name = name || `feature-${total}`;
     path.dataset.bbox = JSON.stringify(computeProjectedBounds(feature, bounds, scale, viewBox));
     if (name && visited.has(name)) {
@@ -403,10 +441,20 @@ function handleFile(file) {
 }
 
 async function loadBuiltin(view) {
-  if (geojsonCache[view] || isLoading[view]) return;
-  isLoading[view] = true;
+  if (view === "world") {
+    await Promise.all([loadSingle("worldOutline"), loadSingle("worldCities")]);
+    if (activeView === "world") render();
+    return;
+  }
+  await loadSingle(view);
+  if (activeView === view) render();
+}
+
+async function loadSingle(key) {
+  if (geojsonCache[key] || isLoading[key]) return;
+  isLoading[key] = true;
   try {
-    const fileDef = BUILTIN_FILES[view];
+    const fileDef = BUILTIN_FILES[key];
     if (Array.isArray(fileDef)) {
       const collections = [];
       for (const url of fileDef) {
@@ -415,19 +463,18 @@ async function loadBuiltin(view) {
         collections.push(await response.json());
       }
       if (collections.length > 0) {
-        geojsonCache[view] = mergeCollections(collections);
+        geojsonCache[key] = mergeCollections(collections);
       }
     } else {
       const response = await fetch(fileDef, { cache: "no-store" });
       if (!response.ok) return;
       const geojson = await response.json();
-      geojsonCache[view] = geojson;
+      geojsonCache[key] = geojson;
     }
-    if (activeView === view) render();
   } catch {
     // Ignore fetch errors; user can still import manually.
   } finally {
-    isLoading[view] = false;
+    isLoading[key] = false;
   }
 }
 
