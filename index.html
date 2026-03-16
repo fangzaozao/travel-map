@@ -13,8 +13,8 @@
           <p class="kicker">Travel Map</p>
           <h1>点亮我的足迹</h1>
           <p class="sub">
-            世界范围点亮访问过的地区，中国范围支持到县级市。支持导入 GeoJSON，
-            点击地图即可标记已去过。
+            世界范围点亮访问过的地区，中国范围支持到县级市。支持导入
+            GeoJSON，点击地图即可标记已去过。
           </p>
         </div>
         <div class="hero-panel">
@@ -22,8 +22,12 @@
             <div class="panel-row">
               <label class="label">当前视图</label>
               <div class="segmented" role="tablist" aria-label="Map View">
-                <button id="tab-world" class="segmented-btn active" type="button">世界地区</button>
-                <button id="tab-china" class="segmented-btn" type="button">中国县级市</button>
+                <button id="tab-world" class="segmented-btn active" type="button">
+                  世界地区
+                </button>
+                <button id="tab-china" class="segmented-btn" type="button">
+                  中国县级市
+                </button>
               </div>
             </div>
             <div class="panel-row">
@@ -39,7 +43,11 @@
             <div class="panel-row">
               <label class="label">搜索点亮</label>
               <div class="inline">
-                <input id="search-input" class="input" placeholder="输入城市/县级市/国家名" />
+                <input
+                  id="search-input"
+                  class="input"
+                  placeholder="输入城市/县级市/国家名"
+                />
                 <button id="search-btn" class="btn small" type="button">标记</button>
               </div>
               <small class="hint">按匹配字段进行搜索，支持中文名称</small>
@@ -63,7 +71,7 @@
             <div class="panel-row">
               <label class="label">已点亮统计</label>
               <div class="stat-card" id="stat-card">
-                <div class="stat-title" id="stat-title">世界视图</div>
+                <div class="stat-title" id="stat-title">世界地区</div>
                 <div class="stat-main">
                   <span id="count-visited">0</span>
                   <span class="stat-sep">/</span>
