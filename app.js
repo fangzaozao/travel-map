@@ -68,6 +68,8 @@ for (const [a, b] of ALIAS_PAIRS) {
   ALIAS_MAP.set(b, a);
 }
 
+const DATA_VERSION = "20260316-3";
+
 const ZH_KEYS = [
   "name_zh",
   "name_zhcn",
@@ -458,7 +460,7 @@ async function loadSingle(key) {
     if (Array.isArray(fileDef)) {
       const collections = [];
       for (const url of fileDef) {
-        const response = await fetch(url, { cache: "no-store" });
+        const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
         if (!response.ok) continue;
         collections.push(await response.json());
       }
@@ -466,7 +468,7 @@ async function loadSingle(key) {
         geojsonCache[key] = mergeCollections(collections);
       }
     } else {
-      const response = await fetch(fileDef, { cache: "no-store" });
+      const response = await fetch(`${fileDef}?v=${DATA_VERSION}`, { cache: "no-store" });
       if (!response.ok) return;
       const geojson = await response.json();
       geojsonCache[key] = geojson;
