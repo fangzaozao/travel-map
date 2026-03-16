@@ -21,7 +21,7 @@ const dropZone = document.getElementById("drop-zone");
 const mapWrap = document.querySelector(".map-wrap");
 const renderStatus = document.getElementById("render-status");
 
-const DATA_VERSION = "20260316-8";
+const DATA_VERSION = "20260316-9";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -257,8 +257,24 @@ function renderChina(token) {
   applyViewBox();
 }
 
-function toggleVisited(name, path) {
+function toggleVisited(name, path, options = {}) {
   const visitedSet = getVisitedSet();
+  if (activeView === "world") {
+    const legacyName = options.legacyName;
+    const isVisited = visitedSet.has(name) || (legacyName && visitedSet.has(legacyName));
+    if (isVisited) {
+      visitedSet.delete(name);
+      if (legacyName) visitedSet.delete(legacyName);
+      path.classList.remove("visited");
+    } else {
+      visitedSet.add(name);
+      path.classList.add("visited");
+    }
+    setVisitedSet(visitedSet);
+    updateWorldStats(visitedSet.size);
+    return;
+  }
+
   if (visitedSet.has(name)) {
     visitedSet.delete(name);
     path.classList.remove("visited");
@@ -267,11 +283,7 @@ function toggleVisited(name, path) {
     path.classList.add("visited");
   }
   setVisitedSet(visitedSet);
-  if (activeView === "world") {
-    updateWorldStats(visitedSet.size);
-  } else {
-    updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
-  }
+  updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
 }
 
 function renderSearchResults() {
@@ -350,7 +362,7 @@ function handleSearch() {
       return;
     }
     const path = chinaPathByName.get(match.name);
-    if (path) toggleVisited(match, path);
+    if (path) toggleVisited(match.name, path);
     return;
   }
 
@@ -358,15 +370,15 @@ function handleSearch() {
     setRenderStatus("加载世界城市中，请稍等...", true);
     loadSingle("worldCities").then(() => {
       setRenderStatus("", false);
-      worldCityScan(query);
+      worldCityScan(query, true);
     });
     return;
   }
 
-  worldCityScan(query);
+  worldCityScan(query, true);
 }
 
-function worldCityScan(query) {
+function worldCityScan(query, autoMark) {
   const normalized = normalizeKey(query);
   const features = normalizeGeoJSON(dataCache.worldCities).features;
   const outline = normalizeGeoJSON(dataCache.worldOutline);
@@ -381,12 +393,12 @@ function worldCityScan(query) {
   searchResults.innerHTML = "";
 
   let index = 0;
-  let shown = 0;
+  const matches = [];
 
   const step = () => {
     if (token !== worldCityScanToken) return;
     let added = 0;
-    while (index < features.length && added < 500) {
+    while (index < features.length && added < 800) {
       const feature = features[index];
       index += 1;
       if (!feature.geometry) continue;
@@ -395,47 +407,108 @@ function worldCityScan(query) {
       if (!name) continue;
       if (!normalizeKey(name).includes(normalized)) continue;
 
-      shown += 1;
-      const pointPath = geometryToPath(feature.geometry, bounds, scale, viewBox);
-      if (pointPath) {
-        let marker = worldCityMarkers.get(name);
-        if (!marker) {
-          marker = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          marker.setAttribute("d", pointPath);
-          marker.classList.add("map-path", "map-city");
-          marker.dataset.name = name;
-          marker.addEventListener("click", () => toggleVisited(name, marker));
-          svg.appendChild(marker);
-          worldCityMarkers.set(name, marker);
-        }
-        if (visited.has(name)) marker.classList.add("visited");
-      }
-
-      const row = document.createElement("div");
-      row.className = "result-item";
-      if (visited.has(name)) row.classList.add("active");
-      const label = document.createElement("span");
-      label.className = "result-name";
-      label.textContent = name;
-      const tag = document.createElement("span");
-      tag.className = "result-tag";
-      tag.textContent = visited.has(name) ? "已点亮" : "未点亮";
-      row.appendChild(label);
-      row.appendChild(tag);
-      row.addEventListener("click", () => toggleVisited(name, worldCityMarkers.get(name)));
-      searchResults.appendChild(row);
-      if (shown >= 20) break;
+      const props = feature.properties || {};
+      const coords = feature.geometry?.coordinates || [];
+      matches.push({
+        name,
+        iso: props.iso_a2 || "",
+        country: props.adm0name || "",
+        pop: Number(props.pop_max) || 0,
+        coords,
+      });
       added += 1;
     }
 
-    if (shown >= 20 || index >= features.length) {
+    if (index >= features.length) {
       setRenderStatus("", false);
+      if (matches.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "results-empty";
+        empty.textContent = "暂无结果";
+        searchResults.appendChild(empty);
+        return;
+      }
+
+      matches.sort((a, b) => {
+        if (b.pop !== a.pop) return b.pop - a.pop;
+        return a.name.localeCompare(b.name);
+      });
+
+      const top = matches.slice(0, 20);
+      let firstMatch = null;
+      for (const item of top) {
+        const key = getWorldCityKey(item);
+        const pointPath = geometryToPath(
+          { type: "Point", coordinates: item.coords },
+          bounds,
+          scale,
+          viewBox
+        );
+        if (pointPath) {
+          let marker = worldCityMarkers.get(key);
+          if (!marker) {
+            marker = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            marker.setAttribute("d", pointPath);
+            marker.classList.add("map-path", "map-city");
+            marker.dataset.key = key;
+            marker.addEventListener("click", () =>
+              toggleVisited(key, marker, { legacyName: item.name })
+            );
+            svg.appendChild(marker);
+            worldCityMarkers.set(key, marker);
+          }
+          if (isWorldVisited(visited, item.name, key)) marker.classList.add("visited");
+          if (!firstMatch) firstMatch = { key, marker, legacyName: item.name };
+        }
+
+        const row = document.createElement("div");
+        row.className = "result-item";
+        const visitedState = isWorldVisited(visited, item.name, key);
+        if (visitedState) row.classList.add("active");
+        const label = document.createElement("span");
+        label.classList.add("result-name");
+        label.textContent = formatWorldLabel(item);
+        const tag = document.createElement("span");
+        tag.className = "result-tag";
+        tag.textContent = visitedState ? "已点亮" : "未点亮";
+        row.appendChild(label);
+        row.appendChild(tag);
+        row.addEventListener("click", () => {
+          const marker = worldCityMarkers.get(key);
+          if (marker) toggleVisited(key, marker, { legacyName: item.name });
+        });
+        searchResults.appendChild(row);
+      }
+
+      if (autoMark && firstMatch?.marker) {
+        toggleVisited(firstMatch.key, firstMatch.marker, { legacyName: firstMatch.legacyName });
+      }
       return;
     }
     requestAnimationFrame(step);
   };
 
   requestAnimationFrame(step);
+}
+
+function getWorldCityKey(item) {
+  const lon = Number(item.coords?.[0]);
+  const lat = Number(item.coords?.[1]);
+  const lonKey = Number.isFinite(lon) ? lon.toFixed(4) : "0";
+  const latKey = Number.isFinite(lat) ? lat.toFixed(4) : "0";
+  return `${item.name}|${item.iso || ""}|${lonKey}|${latKey}`;
+}
+
+function isWorldVisited(visitedSet, legacyName, key) {
+  if (visitedSet.has(key)) return true;
+  if (legacyName && visitedSet.has(legacyName)) return true;
+  return false;
+}
+
+function formatWorldLabel(item) {
+  const suffix = item.country || item.iso;
+  if (!suffix) return item.name;
+  return `${item.name} · ${suffix}`;
 }
 
 function normalizeFeatureName(feature) {
@@ -483,6 +556,23 @@ function collectAliases(feature, name) {
   for (const item of [...aliases]) {
     const mapped = ALIAS_MAP.get(item);
     if (mapped) aliases.add(mapped);
+    const lower = item.toString().toLowerCase();
+    if (lower.includes("taichung")) aliases.add("taizhong");
+    if (lower.includes("taizhong")) aliases.add("taichung");
+    if (lower.includes("taipei")) aliases.add("taibei");
+    if (lower.includes("taibei")) aliases.add("taipei");
+    if (item === "台中") {
+      aliases.add("taichung");
+      aliases.add("taizhong");
+    }
+    if (item === "台北") {
+      aliases.add("taipei");
+      aliases.add("taibei");
+    }
+    if (item === "高雄") {
+      aliases.add("kaohsiung");
+      aliases.add("gaoxiong");
+    }
   }
   return [...aliases].filter(Boolean);
 }
