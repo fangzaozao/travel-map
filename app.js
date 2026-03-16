@@ -103,6 +103,8 @@ let isLoading = {
 let featureIndex = new Map();
 let searchIndex = new Map();
 let featureList = [];
+let featurePathMap = new Map();
+let featureMetaMap = new Map();
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
@@ -168,6 +170,8 @@ function render() {
   featureIndex = new Map();
   searchIndex = new Map();
   featureList = [];
+  featurePathMap = new Map();
+  featureMetaMap = new Map();
   if (activeView === "world") {
     if (!geojsonCache.worldOutline || !geojsonCache.worldCities) {
       emptyState.style.display = "grid";
@@ -218,42 +222,35 @@ function render() {
     if (!feature.geometry) continue;
     normalizeFeatureName(feature);
     const name = feature.properties?.[matchKey] || feature.properties?.name;
-    const pathData = geometryToPath(feature.geometry, bounds, scale, viewBox);
-    if (!pathData) continue;
+    if (!name) continue;
 
     total += 1;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", pathData);
-    path.classList.add("map-path");
-    if (activeView === "world") path.classList.add("map-city");
-    path.dataset.name = name || `feature-${total}`;
-    path.dataset.bbox = JSON.stringify(computeProjectedBounds(feature, bounds, scale, viewBox));
-    if (name && visited.has(name)) {
-      path.classList.add("visited");
+    const aliases = collectAliases(feature, name);
+    const meta = buildFeatureMeta(feature, name, bounds, scale, viewBox);
+    featureMetaMap.set(name, meta);
+    featureList.push({ name, aliases });
+
+    for (const alias of aliases) {
+      const key = normalizeKey(alias);
+      if (key) searchIndex.set(key, name);
     }
 
-    path.addEventListener("click", () => {
-      const id = path.dataset.name;
-      const visitedSet = getVisitedSet();
-      if (visitedSet.has(id)) {
-        visitedSet.delete(id);
-      } else {
-        visitedSet.add(id);
-      }
-      setVisitedSet(visitedSet);
-      path.classList.toggle("visited");
-      updateStats(total, visitedSet.size);
-    });
+    if (activeView !== "world") {
+      const path = createFeaturePath(meta, { isCity: false });
+      featurePathMap.set(name, path);
+      svg.appendChild(path);
+      if (visited.has(name)) path.classList.add("visited");
+    }
+  }
 
-    svg.appendChild(path);
-    if (name) {
-      const aliases = collectAliases(feature, name);
-      featureIndex.set(name, path);
-      featureIndex.set(name.toLowerCase(), path);
-      featureList.push({ name, path, aliases });
-      for (const alias of aliases) {
-        const key = normalizeKey(alias);
-        if (key) searchIndex.set(key, path);
+  if (activeView === "world") {
+    for (const name of visited) {
+      const meta = featureMetaMap.get(name);
+      if (meta) {
+        const path = createFeaturePath(meta, { isCity: true });
+        featurePathMap.set(name, path);
+        path.classList.add("visited");
+        svg.appendChild(path);
       }
     }
   }
@@ -584,20 +581,26 @@ function handleSearch() {
   const query = searchInput.value.trim();
   if (!query) return;
   const normalized = normalizeKey(query);
-  let target = searchIndex.get(normalized);
-  if (!target) {
+  let name = searchIndex.get(normalized);
+  if (!name) {
     const match = featureList.find((item) =>
       item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
     );
-    target = match?.path;
+    name = match?.name;
   }
 
+  if (!name) {
+    alert("\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u540d\u79f0\uff0c\u8bf7\u68c0\u67e5\u5339\u914d\u5b57\u6bb5\u3002");
+    return;
+  }
+
+  const target = ensureFeaturePath(name, activeView === "world");
   if (!target) {
     alert("\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u540d\u79f0\uff0c\u8bf7\u68c0\u67e5\u5339\u914d\u5b57\u6bb5\u3002");
     return;
   }
 
-  const id = target.dataset.name;
+  const id = name;
   const visitedSet = getVisitedSet();
   if (visitedSet.has(id)) {
     visitedSet.delete(id);
@@ -755,6 +758,53 @@ function mergeCollections(collections) {
     }
   }
   return merged;
+}
+
+function buildFeatureMeta(feature, name, bounds, scale, viewBox) {
+  const pathData = geometryToPath(feature.geometry, bounds, scale, viewBox);
+  const bbox = computeProjectedBounds(feature, bounds, scale, viewBox);
+  return {
+    name,
+    feature,
+    pathData,
+    bbox,
+  };
+}
+
+function createFeaturePath(meta, { isCity }) {
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", meta.pathData);
+  path.classList.add("map-path");
+  if (isCity) path.classList.add("map-city");
+  path.dataset.name = meta.name;
+  path.dataset.bbox = JSON.stringify(meta.bbox);
+
+  path.addEventListener("click", () => {
+    const id = meta.name;
+    const visitedSet = getVisitedSet();
+    if (visitedSet.has(id)) {
+      visitedSet.delete(id);
+      path.classList.remove("visited");
+    } else {
+      visitedSet.add(id);
+      path.classList.add("visited");
+    }
+    setVisitedSet(visitedSet);
+    updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
+  });
+
+  return path;
+}
+
+function ensureFeaturePath(name, isCity) {
+  let path = featurePathMap.get(name);
+  if (path) return path;
+  const meta = featureMetaMap.get(name);
+  if (!meta) return null;
+  path = createFeaturePath(meta, { isCity });
+  featurePathMap.set(name, path);
+  svg.appendChild(path);
+  return path;
 }
 
 function normalizeKey(value) {
