@@ -19,6 +19,7 @@ const exportBtn = document.getElementById("export-btn");
 const clearBtn = document.getElementById("clear-btn");
 const dropZone = document.getElementById("drop-zone");
 const mapWrap = document.querySelector(".map-wrap");
+const renderStatus = document.getElementById("render-status");
 
 const DEFAULT_MATCH_KEYS = {
   world: "name",
@@ -109,6 +110,8 @@ let renderState = {
   world: null,
   china: null,
 };
+let renderToken = 0;
+let searchDebounceTimer = null;
 let viewBoxState = {
   world: { x: 0, y: 0, w: 1000, h: 600 },
   china: { x: 0, y: 0, w: 1000, h: 600 },
@@ -170,12 +173,15 @@ function loadGeoJSONForActiveView(geojson) {
 }
 
 function render() {
+  renderToken += 1;
+  const token = renderToken;
   clearSvg();
   featureIndex = new Map();
   searchIndex = new Map();
   featureList = [];
   featurePathMap = new Map();
   featureMetaMap = new Map();
+  setRenderStatus("", false);
   if (activeView === "world") {
     if (!geojsonCache.worldOutline || !geojsonCache.worldCities) {
       emptyState.style.display = "grid";
@@ -224,31 +230,69 @@ function render() {
       ? normalizeGeoJSON(geojsonCache.worldCities).features
       : normalizeGeoJSON(geojsonCache[activeView]).features;
 
-  for (const feature of activeFeatures) {
-    if (!feature.geometry) continue;
-    normalizeFeatureName(feature);
-    const name = feature.properties?.[matchKey] || feature.properties?.name;
-    if (!name) continue;
+  if (activeView !== "world") {
+    const totalFeatures = activeFeatures.length;
+    let index = 0;
 
-    total += 1;
-    const aliases = collectAliases(feature, name);
-    const meta =
-      activeView === "world"
-        ? { name, feature, pathData: null, bbox: null }
-        : buildFeatureMeta(feature, name, bounds, scale, viewBox);
-    featureMetaMap.set(name, meta);
-    featureList.push({ name, aliases });
+    const step = () => {
+      if (token !== renderToken) return;
+      const fragment = document.createDocumentFragment();
+      let added = 0;
+      while (index < totalFeatures && added < 250) {
+        const feature = activeFeatures[index];
+        index += 1;
+        if (!feature.geometry) continue;
+        normalizeFeatureName(feature);
+        const name = feature.properties?.[matchKey] || feature.properties?.name;
+        if (!name) continue;
 
-    for (const alias of aliases) {
-      const key = normalizeKey(alias);
-      if (key) searchIndex.set(key, name);
-    }
+        total += 1;
+        const aliases = collectAliases(feature, name);
+        const meta = buildFeatureMeta(feature, name, bounds, scale, viewBox);
+        featureMetaMap.set(name, meta);
+        featureList.push({ name, aliases });
 
-    if (activeView !== "world") {
-      const path = createFeaturePath(meta, { isCity: false });
-      featurePathMap.set(name, path);
-      svg.appendChild(path);
-      if (visited.has(name)) path.classList.add("visited");
+        for (const alias of aliases) {
+          const key = normalizeKey(alias);
+          if (key) searchIndex.set(key, name);
+        }
+
+        const path = createFeaturePath(meta, { isCity: false });
+        featurePathMap.set(name, path);
+        if (visited.has(name)) path.classList.add("visited");
+        fragment.appendChild(path);
+        added += 1;
+      }
+      svg.appendChild(fragment);
+      updateStats(total, visited.size);
+      if (index < totalFeatures) {
+        setRenderStatus(`加载中 ${index}/${totalFeatures}`, true);
+        requestAnimationFrame(step);
+      } else {
+        setRenderStatus("", false);
+        renderSearchResults();
+      }
+    };
+
+    setRenderStatus(`加载中 0/${totalFeatures}`, true);
+    requestAnimationFrame(step);
+  } else {
+    for (const feature of activeFeatures) {
+      if (!feature.geometry) continue;
+      normalizeFeatureName(feature);
+      const name = feature.properties?.[matchKey] || feature.properties?.name;
+      if (!name) continue;
+
+      total += 1;
+      const aliases = collectAliases(feature, name);
+      const meta = { name, feature, pathData: null, bbox: null };
+      featureMetaMap.set(name, meta);
+      featureList.push({ name, aliases });
+
+      for (const alias of aliases) {
+        const key = normalizeKey(alias);
+        if (key) searchIndex.set(key, name);
+      }
     }
   }
 
@@ -266,7 +310,9 @@ function render() {
 
   applyViewBox();
   updateStats(total, visited.size);
-  renderSearchResults();
+  if (activeView === "world") {
+    renderSearchResults();
+  }
 }
 
 function normalizeGeoJSON(geojson) {
@@ -833,6 +879,12 @@ function hydrateMeta(meta, viewKey) {
   return meta;
 }
 
+function setRenderStatus(text, show) {
+  if (!renderStatus) return;
+  renderStatus.textContent = text;
+  renderStatus.style.display = show ? "inline-flex" : "none";
+}
+
 function normalizeKey(value) {
   if (!value) return "";
   return value
@@ -958,6 +1010,11 @@ searchBtn.addEventListener("click", handleSearch);
 searchInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") handleSearch();
 });
-searchInput.addEventListener("input", renderSearchResults);
+searchInput.addEventListener("input", () => {
+  if (searchDebounceTimer) window.clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = window.setTimeout(() => {
+    renderSearchResults();
+  }, 150);
+});
 
 setActiveTab("world");

@@ -236,6 +236,19 @@ body {
   padding: 32px;
 }
 
+.render-status {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  background: rgba(255, 247, 239, 0.9);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: none;
+}
+
 .drop-zone {
   position: absolute;
   inset: 0;
