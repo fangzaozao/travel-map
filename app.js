@@ -68,7 +68,7 @@ for (const [a, b] of ALIAS_PAIRS) {
   ALIAS_MAP.set(b, a);
 }
 
-const DATA_VERSION = "20260316-3";
+const DATA_VERSION = "20260316-4";
 
 const ZH_KEYS = [
   "name_zh",
