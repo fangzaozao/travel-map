@@ -21,7 +21,7 @@ const dropZone = document.getElementById("drop-zone");
 const mapWrap = document.querySelector(".map-wrap");
 const renderStatus = document.getElementById("render-status");
 
-const DATA_VERSION = "20260316-9";
+const DATA_VERSION = "20260316-10";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -51,6 +51,7 @@ let worldCityMarkers = new Map();
 let chinaPathByName = new Map();
 let chinaItems = [];
 let worldCityScanToken = 0;
+let lastWorldMatches = null;
 
 const ALIAS_PAIRS = [
   ["Taipei", "台北"],
@@ -272,6 +273,9 @@ function toggleVisited(name, path, options = {}) {
     }
     setVisitedSet(visitedSet);
     updateWorldStats(visitedSet.size);
+    if (lastWorldMatches && searchInput.value.trim()) {
+      renderWorldResults(lastWorldMatches, false);
+    }
     return;
   }
 
@@ -435,60 +439,73 @@ function worldCityScan(query, autoMark) {
       });
 
       const top = matches.slice(0, 20);
-      let firstMatch = null;
-      for (const item of top) {
-        const key = getWorldCityKey(item);
-        const pointPath = geometryToPath(
-          { type: "Point", coordinates: item.coords },
-          bounds,
-          scale,
-          viewBox
-        );
-        if (pointPath) {
-          let marker = worldCityMarkers.get(key);
-          if (!marker) {
-            marker = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            marker.setAttribute("d", pointPath);
-            marker.classList.add("map-path", "map-city");
-            marker.dataset.key = key;
-            marker.addEventListener("click", () =>
-              toggleVisited(key, marker, { legacyName: item.name })
-            );
-            svg.appendChild(marker);
-            worldCityMarkers.set(key, marker);
-          }
-          if (isWorldVisited(visited, item.name, key)) marker.classList.add("visited");
-          if (!firstMatch) firstMatch = { key, marker, legacyName: item.name };
-        }
-
-        const row = document.createElement("div");
-        row.className = "result-item";
-        const visitedState = isWorldVisited(visited, item.name, key);
-        if (visitedState) row.classList.add("active");
-        const label = document.createElement("span");
-        label.classList.add("result-name");
-        label.textContent = formatWorldLabel(item);
-        const tag = document.createElement("span");
-        tag.className = "result-tag";
-        tag.textContent = visitedState ? "已点亮" : "未点亮";
-        row.appendChild(label);
-        row.appendChild(tag);
-        row.addEventListener("click", () => {
-          const marker = worldCityMarkers.get(key);
-          if (marker) toggleVisited(key, marker, { legacyName: item.name });
-        });
-        searchResults.appendChild(row);
-      }
-
-      if (autoMark && firstMatch?.marker) {
-        toggleVisited(firstMatch.key, firstMatch.marker, { legacyName: firstMatch.legacyName });
-      }
+      lastWorldMatches = top;
+      renderWorldResults(top, autoMark);
       return;
     }
     requestAnimationFrame(step);
   };
 
   requestAnimationFrame(step);
+}
+
+function renderWorldResults(items, autoMark) {
+  const outline = normalizeGeoJSON(dataCache.worldOutline);
+  const bounds = outline.bounds;
+  const viewBox = { width: 1000, height: 600 };
+  const scale = computeScale(bounds, viewBox);
+  const visited = getVisitedSet();
+  searchResults.innerHTML = "";
+  let firstMatch = null;
+
+  for (const item of items) {
+    const key = getWorldCityKey(item);
+    const pointPath = geometryToPath(
+      { type: "Point", coordinates: item.coords },
+      bounds,
+      scale,
+      viewBox
+    );
+    if (pointPath) {
+      let marker = worldCityMarkers.get(key);
+      if (!marker) {
+        marker = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        marker.setAttribute("d", pointPath);
+        marker.classList.add("map-path", "map-city");
+        marker.dataset.key = key;
+        marker.addEventListener("click", () =>
+          toggleVisited(key, marker, { legacyName: item.name })
+        );
+        svg.appendChild(marker);
+        worldCityMarkers.set(key, marker);
+      }
+      if (isWorldVisited(visited, item.name, key)) marker.classList.add("visited");
+      else marker.classList.remove("visited");
+      if (!firstMatch) firstMatch = { key, marker, legacyName: item.name };
+    }
+
+    const row = document.createElement("div");
+    row.className = "result-item";
+    const visitedState = isWorldVisited(visited, item.name, key);
+    if (visitedState) row.classList.add("active");
+    const label = document.createElement("span");
+    label.classList.add("result-name");
+    label.textContent = formatWorldLabel(item);
+    const tag = document.createElement("span");
+    tag.className = "result-tag";
+    tag.textContent = visitedState ? "已点亮" : "未点亮";
+    row.appendChild(label);
+    row.appendChild(tag);
+    row.addEventListener("click", () => {
+      const marker = worldCityMarkers.get(key);
+      if (marker) toggleVisited(key, marker, { legacyName: item.name });
+    });
+    searchResults.appendChild(row);
+  }
+
+  if (autoMark && firstMatch?.marker) {
+    toggleVisited(firstMatch.key, firstMatch.marker, { legacyName: firstMatch.legacyName });
+  }
 }
 
 function getWorldCityKey(item) {
