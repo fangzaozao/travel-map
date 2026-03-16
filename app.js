@@ -21,7 +21,7 @@ const dropZone = document.getElementById("drop-zone");
 const mapWrap = document.querySelector(".map-wrap");
 const renderStatus = document.getElementById("render-status");
 
-const DATA_VERSION = "20260316-7";
+const DATA_VERSION = "20260316-8";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -49,8 +49,28 @@ let panStart = null;
 let searchDebounceTimer = null;
 let worldCityMarkers = new Map();
 let chinaPathByName = new Map();
-let chinaNameList = [];
+let chinaItems = [];
 let worldCityScanToken = 0;
+
+const ALIAS_PAIRS = [
+  ["Taipei", "台北"],
+  ["Taipei City", "台北"],
+  ["Taibei", "台北"],
+  ["Taichung", "台中"],
+  ["Taichung City", "台中"],
+  ["Taizhong", "台中"],
+  ["Kaohsiung", "高雄"],
+  ["Kaohsiung City", "高雄"],
+  ["Gaoxiong", "高雄"],
+  ["Hong Kong", "香港"],
+  ["Macau", "澳门"],
+];
+
+const ALIAS_MAP = new Map();
+for (const [a, b] of ALIAS_PAIRS) {
+  ALIAS_MAP.set(a, b);
+  ALIAS_MAP.set(b, a);
+}
 
 function setActiveTab(view) {
   activeView = view;
@@ -89,6 +109,13 @@ function updateStats(total, visited) {
   progressLabel.textContent = `${percent}%`;
 }
 
+function updateWorldStats(visited) {
+  countVisited.textContent = visited.toString();
+  countTotal.textContent = "∞";
+  progressFill.style.width = visited > 0 ? "100%" : "0%";
+  progressLabel.textContent = `${visited} 已点亮`;
+}
+
 function clearSvg() {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
 }
@@ -123,7 +150,7 @@ function render() {
   clearSvg();
   worldCityMarkers = new Map();
   chinaPathByName = new Map();
-  chinaNameList = [];
+  chinaItems = [];
   setRenderStatus("", false);
 
   if (activeView === "world") {
@@ -160,7 +187,7 @@ function renderWorld(token) {
   }
 
   applyViewBox();
-  updateStats(getVisitedSet().size, getVisitedSet().size);
+  updateWorldStats(getVisitedSet().size);
   renderSearchResults();
   setRenderStatus("输入城市名进行标注", true);
 }
@@ -211,7 +238,7 @@ function renderChina(token) {
       path.addEventListener("click", () => toggleVisited(name, path));
       fragment.appendChild(path);
       chinaPathByName.set(name, path);
-      chinaNameList.push(name);
+      chinaItems.push({ name, aliases: collectAliases(feature, name) });
       added += 1;
     }
     svg.appendChild(fragment);
@@ -240,7 +267,11 @@ function toggleVisited(name, path) {
     path.classList.add("visited");
   }
   setVisitedSet(visitedSet);
-  updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
+  if (activeView === "world") {
+    updateWorldStats(visitedSet.size);
+  } else {
+    updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
+  }
 }
 
 function renderSearchResults() {
@@ -264,8 +295,14 @@ function renderSearchResults() {
 
   const visitedSet = getVisitedSet();
   const normalized = normalizeKey(query);
-  const list = activeView === "china" ? chinaNameList : [];
-  const matches = list.filter((name) => normalizeKey(name).includes(normalized)).slice(0, 20);
+  const matches =
+    activeView === "china"
+      ? chinaItems
+          .filter((item) =>
+            item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
+          )
+          .slice(0, 20)
+      : [];
 
   if (matches.length === 0) {
     const empty = document.createElement("div");
@@ -275,7 +312,8 @@ function renderSearchResults() {
     return;
   }
 
-  for (const name of matches) {
+  for (const item of matches) {
+    const name = item.name;
     const row = document.createElement("div");
     row.className = "result-item";
     if (visitedSet.has(name)) row.classList.add("active");
@@ -304,12 +342,14 @@ function handleSearch() {
 
   if (activeView === "china") {
     const normalized = normalizeKey(query);
-    const match = chinaNameList.find((name) => normalizeKey(name).includes(normalized));
+    const match = chinaItems.find((item) =>
+      item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
+    );
     if (!match) {
       alert("没有找到匹配的名称，请检查匹配字段。");
       return;
     }
-    const path = chinaPathByName.get(match);
+    const path = chinaPathByName.get(match.name);
     if (path) toggleVisited(match, path);
     return;
   }
@@ -415,6 +455,36 @@ function normalizeFeatureName(feature) {
 function normalizeKey(value) {
   if (!value) return "";
   return value.toString().trim().toLowerCase().replace(/[\\s\\u00A0]+/g, "").replace(/[\\-_.'"]/g, "");
+}
+
+function collectAliases(feature, name) {
+  const aliases = new Set();
+  if (name) aliases.add(name);
+  const props = feature.properties || {};
+  const keys = [
+    "name",
+    "shapeName",
+    "NAME",
+    "NAME_EN",
+    "NAME_LONG",
+    "NAME_LOCAL",
+    "name_en",
+    "name_zh",
+    "NAME_ZH",
+    "NAME_ZH_CN",
+    "NAME_ZH_HANS",
+    "NAME_ZH_HANT",
+    "chinese",
+    "CHINESE",
+  ];
+  for (const key of keys) {
+    if (props[key]) aliases.add(props[key]);
+  }
+  for (const item of [...aliases]) {
+    const mapped = ALIAS_MAP.get(item);
+    if (mapped) aliases.add(mapped);
+  }
+  return [...aliases].filter(Boolean);
 }
 
 function mergeCollections(collections) {
