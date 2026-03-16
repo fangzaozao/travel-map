@@ -29,7 +29,7 @@ const BUILTIN_FILES = {
   world: "data/world.geojson",
   china: [
     "data/china_adm3.geojson",
-    "data/taiwan_adm2.geojson",
+    "data/taiwan_adm1.geojson",
     "data/hk_mac_subunits.geojson",
   ],
 };
@@ -748,6 +748,10 @@ function collectAliases(feature, name) {
   for (const item of [...aliases]) {
     const mapped = ALIAS_MAP.get(item);
     if (mapped) aliases.add(mapped);
+    const lower = item.toString().toLowerCase();
+    if (lower.includes("taipei")) aliases.add("Taibei");
+    if (lower.includes("taichung")) aliases.add("Taizhong");
+    if (lower.includes("kaohsiung")) aliases.add("Gaoxiong");
   }
   return [...aliases].filter(Boolean);
 }
