@@ -73,6 +73,16 @@ body {
   gap: 6px;
 }
 
+.auth-box {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-status {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
 .label {
   font-size: 0.82rem;
   color: var(--muted);

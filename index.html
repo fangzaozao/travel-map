@@ -41,6 +41,19 @@
               <small class="hint">建议使用 EPSG:4326（经纬度）格式的 GeoJSON</small>
             </div>
             <div class="panel-row">
+              <label class="label">账号同步</label>
+              <div class="auth-box">
+                <input id="auth-email" class="input" placeholder="输入邮箱接收登录链接" />
+                <div class="inline">
+                  <button id="auth-send" class="btn small" type="button">发送登录链接</button>
+                  <button id="auth-sync" class="btn ghost small" type="button">立即同步</button>
+                  <button id="auth-signout" class="btn ghost small" type="button">退出登录</button>
+                </div>
+                <div id="auth-status" class="auth-status">未登录</div>
+                <small class="hint">邮箱登录后可跨设备同步</small>
+              </div>
+            </div>
+            <div class="panel-row">
               <label class="label">搜索点亮</label>
               <div class="inline">
                 <input
@@ -119,6 +132,7 @@
       </section>
     </div>
 
-    <script src="app.js?v=20260323-2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js?v=20260323-4"></script>
   </body>
 </html>

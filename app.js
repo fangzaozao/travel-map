@@ -20,8 +20,15 @@ const clearBtn = document.getElementById("clear-btn");
 const dropZone = document.getElementById("drop-zone");
 const mapWrap = document.querySelector(".map-wrap");
 const renderStatus = document.getElementById("render-status");
+const authEmailInput = document.getElementById("auth-email");
+const authSendBtn = document.getElementById("auth-send");
+const authSyncBtn = document.getElementById("auth-sync");
+const authSignOutBtn = document.getElementById("auth-signout");
+const authStatus = document.getElementById("auth-status");
 
-const DATA_VERSION = "20260323-2";
+const DATA_VERSION = "20260323-4";
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -52,6 +59,10 @@ let chinaPathByName = new Map();
 let chinaItems = [];
 let worldCityScanToken = 0;
 let lastWorldMatches = null;
+let supabaseClient = null;
+let authUser = null;
+let syncTimer = null;
+let isApplyingRemote = false;
 
 const ALIAS_PAIRS = [
   ["Taipei", "台北"],
@@ -88,8 +99,8 @@ function setRenderStatus(text, show) {
   renderStatus.style.display = show ? "inline-flex" : "none";
 }
 
-function getVisitedSet() {
-  const raw = localStorage.getItem(VIEW_KEYS[activeView]);
+function getVisitedSetForView(view) {
+  const raw = localStorage.getItem(VIEW_KEYS[view]);
   if (!raw) return new Set();
   try {
     return new Set(JSON.parse(raw));
@@ -98,8 +109,17 @@ function getVisitedSet() {
   }
 }
 
+function setVisitedSetForView(view, set) {
+  localStorage.setItem(VIEW_KEYS[view], JSON.stringify([...set]));
+  if (!isApplyingRemote) scheduleCloudSync();
+}
+
+function getVisitedSet() {
+  return getVisitedSetForView(activeView);
+}
+
 function setVisitedSet(set) {
-  localStorage.setItem(VIEW_KEYS[activeView], JSON.stringify([...set]));
+  setVisitedSetForView(activeView, set);
 }
 
 function updateStats(total, visited) {
@@ -233,8 +253,9 @@ function renderChina(token) {
       if (!feature.geometry) continue;
       normalizeFeatureName(feature);
       const props = feature.properties || {};
-      const name = props[normalizeMatchKey()] || props.name;
-      if (!name) continue;
+      const nameKey = cleanName(props.NAME_3) || cleanName(props.shapeName) || props[normalizeMatchKey()] || props.name;
+      const displayName = cleanName(props.NL_NAME_3) || cleanName(props.NAME_3) || nameKey;
+      if (!nameKey) continue;
 
       total += 1;
       const pathData = geometryToPath(feature.geometry, bounds, scale, viewBox);
@@ -245,8 +266,8 @@ function renderChina(token) {
       path.classList.add("map-path");
       if (visited.has(name)) path.classList.add("visited");
       const cityKey = getChinaCityKey(props);
-      const isDistrict = isChinaDistrict(props, name);
-      path.dataset.name = name;
+      const isDistrict = isChinaDistrict(props, displayName);
+      path.dataset.name = nameKey;
       path.dataset.cityKey = cityKey || "";
       path.dataset.isDistrict = isDistrict ? "1" : "0";
       path.dataset.bbox = JSON.stringify(computeProjectedBounds(feature, bounds, scale, viewBox));
@@ -255,15 +276,16 @@ function renderChina(token) {
           toggleChinaCityDistricts(cityKey);
           renderSearchResults();
         } else {
-          toggleVisited(name, path);
+          toggleVisited(nameKey, path);
           renderSearchResults();
         }
       });
       fragment.appendChild(path);
-      chinaPathByName.set(name, path);
+      chinaPathByName.set(nameKey, path);
       chinaItems.push({
-        name,
-        aliases: collectAliases(feature, name),
+        name: nameKey,
+        label: displayName,
+        aliases: collectAliases(feature, displayName, nameKey),
         cityKey,
         isDistrict,
         path,
@@ -341,14 +363,16 @@ function renderSearchResults() {
   const normalized = normalizeKey(query);
   const matches =
     activeView === "china"
-      ? chinaItems
-          .filter((item) =>
-            item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
-          )
-          .slice(0, 20)
+      ? chinaItems.filter((item) =>
+          item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
+        )
+      : [];
+  const cityMatches =
+    activeView === "china"
+      ? buildChinaCityMatches(normalized)
       : [];
 
-  if (matches.length === 0) {
+  if (matches.length === 0 && cityMatches.length === 0) {
     const empty = document.createElement("div");
     empty.className = "results-empty";
     empty.textContent = "暂无结果";
@@ -356,28 +380,80 @@ function renderSearchResults() {
     return;
   }
 
+  const rows = [];
+  for (const city of cityMatches) {
+    rows.push({
+      type: "city",
+      key: city.cityKey,
+      name: `${city.cityKey}（地级市）`,
+      tag: city.tag,
+      active: city.active,
+      onClick: () => {
+        toggleChinaCityDistricts(city.cityKey);
+        renderSearchResults();
+      },
+    });
+  }
+
   for (const item of matches) {
     const name = item.name;
+    rows.push({
+      type: "item",
+      key: name,
+      name: item.label || name,
+      tag: visitedSet.has(name) ? "已点亮" : "未点亮",
+      active: visitedSet.has(name),
+      onClick: () => {
+        searchInput.value = item.label || name;
+        handleSearch();
+      },
+    });
+  }
+
+  rows.slice(0, 20).forEach((rowData) => {
     const row = document.createElement("div");
     row.className = "result-item";
-    if (visitedSet.has(name)) row.classList.add("active");
+    if (rowData.active) row.classList.add("active");
 
     const label = document.createElement("span");
     label.className = "result-name";
-    label.textContent = name;
+    label.textContent = rowData.name;
 
     const tag = document.createElement("span");
     tag.className = "result-tag";
-    tag.textContent = visitedSet.has(name) ? "已点亮" : "未点亮";
+    tag.textContent = rowData.tag;
 
     row.appendChild(label);
     row.appendChild(tag);
-    row.addEventListener("click", () => {
-      searchInput.value = name;
-      handleSearch();
-    });
+    row.addEventListener("click", rowData.onClick);
     searchResults.appendChild(row);
+  });
+}
+
+function buildChinaCityMatches(normalized) {
+  const map = new Map();
+  for (const item of chinaItems) {
+    if (!item.isDistrict || !item.cityKey) continue;
+    if (!normalizeKey(item.cityKey).includes(normalized)) continue;
+    if (!map.has(item.cityKey)) map.set(item.cityKey, []);
+    map.get(item.cityKey).push(item);
   }
+  const visitedSet = getVisitedSet();
+  const results = [];
+  for (const [cityKey, items] of map.entries()) {
+    const total = items.length;
+    const visitedCount = items.filter((it) => visitedSet.has(it.name)).length;
+    let tag = "未点亮";
+    let active = false;
+    if (visitedCount === total) {
+      tag = "已点亮";
+      active = true;
+    } else if (visitedCount > 0) {
+      tag = "部分点亮";
+    }
+    results.push({ cityKey, tag, active });
+  }
+  return results.sort((a, b) => a.cityKey.localeCompare(b.cityKey));
 }
 
 function handleSearch() {
@@ -575,6 +651,136 @@ function formatWorldLabel(item) {
   return `${item.name} · ${suffix}`;
 }
 
+function initSupabase() {
+  if (!authEmailInput || !authSendBtn || !authStatus) return;
+  if (
+    !SUPABASE_URL ||
+    !SUPABASE_ANON_KEY ||
+    SUPABASE_URL.startsWith("YOUR_") ||
+    SUPABASE_ANON_KEY.startsWith("YOUR_")
+  ) {
+    setAuthStatus("未配置 Supabase");
+    authSendBtn.disabled = true;
+    authSyncBtn.disabled = true;
+    authSignOutBtn.disabled = true;
+    return;
+  }
+  if (!window.supabase?.createClient) {
+    setAuthStatus("Supabase SDK 未加载");
+    return;
+  }
+
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: true },
+  });
+
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    authUser = session?.user ?? null;
+    updateAuthUI();
+    if (authUser) {
+      syncFromCloud();
+    }
+  });
+
+  updateAuthUI();
+}
+
+function setAuthStatus(text) {
+  if (authStatus) authStatus.textContent = text;
+}
+
+function updateAuthUI() {
+  if (!authStatus) return;
+  if (authUser) {
+    const email = authUser.email || "已登录";
+    setAuthStatus(`已登录：${email}`);
+    authSendBtn.disabled = true;
+    authSyncBtn.disabled = false;
+    authSignOutBtn.disabled = false;
+  } else {
+    setAuthStatus("未登录");
+    authSendBtn.disabled = false;
+    authSyncBtn.disabled = true;
+    authSignOutBtn.disabled = true;
+  }
+}
+
+function collectLocalPayload() {
+  return {
+    world: [...getVisitedSetForView("world")],
+    china: [...getVisitedSetForView("china")],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function applyRemotePayload(payload) {
+  if (!payload) return;
+  isApplyingRemote = true;
+  setVisitedSetForView("world", new Set(payload.world || []));
+  setVisitedSetForView("china", new Set(payload.china || []));
+  isApplyingRemote = false;
+  render();
+}
+
+function mergePayload(localPayload, remotePayload) {
+  const mergedWorld = new Set([...(localPayload.world || []), ...(remotePayload.world || [])]);
+  const mergedChina = new Set([...(localPayload.china || []), ...(remotePayload.china || [])]);
+  return {
+    world: [...mergedWorld],
+    china: [...mergedChina],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function syncFromCloud() {
+  if (!supabaseClient || !authUser) return;
+  setAuthStatus("同步中...");
+  const { data, error } = await supabaseClient
+    .from("travel_map_states")
+    .select("payload, updated_at")
+    .eq("user_id", authUser.id)
+    .limit(1);
+  if (error) {
+    setAuthStatus("同步失败");
+    return;
+  }
+  const remote = data?.[0]?.payload;
+  if (remote) {
+    const merged = mergePayload(collectLocalPayload(), remote);
+    applyRemotePayload(merged);
+    await syncToCloud(merged);
+  }
+  setAuthStatus(`已登录：${authUser.email || "账号"}`);
+}
+
+async function syncToCloud(payloadOverride) {
+  if (!supabaseClient || !authUser) return;
+  const payload = payloadOverride || collectLocalPayload();
+  const { error } = await supabaseClient
+    .from("travel_map_states")
+    .upsert(
+      {
+        user_id: authUser.id,
+        payload,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+  if (error) {
+    setAuthStatus("同步失败");
+    return;
+  }
+  setAuthStatus(`已登录：${authUser.email || "账号"}`);
+}
+
+function scheduleCloudSync() {
+  if (!authUser) return;
+  if (syncTimer) window.clearTimeout(syncTimer);
+  syncTimer = window.setTimeout(() => {
+    syncToCloud();
+  }, 800);
+}
+
 function normalizeFeatureName(feature) {
   if (!feature.properties) feature.properties = {};
   if (feature.properties.name) return;
@@ -681,9 +887,10 @@ function toggleChinaCityDistricts(cityKey) {
   updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
 }
 
-function collectAliases(feature, name) {
+function collectAliases(feature, name, nameKey) {
   const aliases = new Set();
   if (name) aliases.add(name);
+  if (nameKey) aliases.add(nameKey);
   const props = feature.properties || {};
   const keys = [
     "name",
@@ -1043,4 +1250,43 @@ searchInput.addEventListener("input", () => {
   }, 150);
 });
 
+if (authSendBtn) {
+  authSendBtn.addEventListener("click", async () => {
+    if (!supabaseClient) return;
+    const email = authEmailInput.value.trim();
+    if (!email) {
+      setAuthStatus("请输入邮箱");
+      return;
+    }
+    setAuthStatus("发送中...");
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await supabaseClient.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) {
+      setAuthStatus("发送失败");
+      return;
+    }
+    setAuthStatus("已发送登录链接，请查收邮箱");
+  });
+}
+
+if (authSyncBtn) {
+  authSyncBtn.addEventListener("click", () => {
+    if (!supabaseClient || !authUser) return;
+    syncFromCloud();
+  });
+}
+
+if (authSignOutBtn) {
+  authSignOutBtn.addEventListener("click", async () => {
+    if (!supabaseClient) return;
+    await supabaseClient.auth.signOut();
+    authUser = null;
+    updateAuthUI();
+  });
+}
+
+initSupabase();
 setActiveTab("world");
