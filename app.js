@@ -27,8 +27,8 @@ const authSignOutBtn = document.getElementById("auth-signout");
 const authStatus = document.getElementById("auth-status");
 
 const DATA_VERSION = "20260323-4";
-const SUPABASE_URL = "YOUR_SUPABASE_URL";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL = "https://gmmvwnrqkwbxdqishreb.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_3o3hYeHXEbVeji8ZQtOvIg_Z4JJxsY6";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
