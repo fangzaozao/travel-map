@@ -26,12 +26,17 @@ const authSyncBtn = document.getElementById("auth-sync");
 const authSignOutBtn = document.getElementById("auth-signout");
 const authStatus = document.getElementById("auth-status");
 
-const DATA_VERSION = "20260323-6";
+const DATA_VERSION = "20260323-7";
 const SUPABASE_URL = "https://gmmvwnrqkwbxdqishreb.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_3o3hYeHXEbVeji8ZQtOvIg_Z4JJxsY6";
 const SUPABASE_REDIRECT_URL = "https://fangzaozao.github.io/travel-map/";
 const PROJECT_BASE = window.location.hostname.endsWith("github.io") ? "/travel-map/" : "/";
 const BASE_URL = `${window.location.origin}${PROJECT_BASE}`;
+const FALLBACK_BASES = [
+  BASE_URL,
+  `${window.location.origin}/travel-map/`,
+  `${window.location.origin}/`,
+];
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -155,25 +160,25 @@ async function loadSingle(key) {
     if (key === "china") {
       const collections = [];
       for (const url of fileDef) {
-        const response = await fetch(`${resolveUrl(url)}?v=${DATA_VERSION}`, { cache: "no-store" });
-        if (!response.ok) continue;
-        collections.push(await response.json());
+        const result = await fetchWithFallback(url);
+        if (!result) continue;
+        collections.push(result);
       }
       if (collections.length > 0) {
         dataCache[key] = mergeCollections(collections);
       }
     } else {
       for (const url of fileDef) {
-        const response = await fetch(`${resolveUrl(url)}?v=${DATA_VERSION}`, { cache: "no-store" });
-        if (!response.ok) continue;
-        dataCache[key] = await response.json();
+        const result = await fetchWithFallback(url);
+        if (!result) continue;
+        dataCache[key] = result;
         break;
       }
     }
   } else {
-    const response = await fetch(`${resolveUrl(fileDef)}?v=${DATA_VERSION}`, { cache: "no-store" });
-    if (!response.ok) return;
-    dataCache[key] = await response.json();
+    const result = await fetchWithFallback(fileDef);
+    if (!result) return;
+    dataCache[key] = result;
   }
 }
 
@@ -199,6 +204,23 @@ function resolveUrl(relativePath) {
   } catch {
     return relativePath;
   }
+}
+
+async function fetchWithFallback(relativePath) {
+  const attempts = [];
+  for (const base of FALLBACK_BASES) {
+    try {
+      const url = new URL(relativePath, base).toString();
+      attempts.push(url);
+      const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
+      if (response.ok) return await response.json();
+    } catch {
+      // ignore
+    }
+  }
+  console.error("Failed to load", relativePath, attempts);
+  setRenderStatus(`数据加载失败：${relativePath}`, true);
+  return null;
 }
 
 function renderWorld(token) {
