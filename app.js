@@ -26,9 +26,10 @@ const authSyncBtn = document.getElementById("auth-sync");
 const authSignOutBtn = document.getElementById("auth-signout");
 const authStatus = document.getElementById("auth-status");
 
-const DATA_VERSION = "20260323-4";
+const DATA_VERSION = "20260323-5";
 const SUPABASE_URL = "https://gmmvwnrqkwbxdqishreb.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_3o3hYeHXEbVeji8ZQtOvIg_Z4JJxsY6";
+const SUPABASE_REDIRECT_URL = "https://fangzaozao.github.io/travel-map/";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -1259,13 +1260,13 @@ if (authSendBtn) {
       return;
     }
     setAuthStatus("发送中...");
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const redirectTo = SUPABASE_REDIRECT_URL || `${window.location.origin}${window.location.pathname}`;
     const { error } = await supabaseClient.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
     });
     if (error) {
-      setAuthStatus("发送失败");
+      setAuthStatus(`发送失败：${error.message || "未知错误"}`);
       return;
     }
     setAuthStatus("已发送登录链接，请查收邮箱");
