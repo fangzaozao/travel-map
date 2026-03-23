@@ -21,7 +21,7 @@ const dropZone = document.getElementById("drop-zone");
 const mapWrap = document.querySelector(".map-wrap");
 const renderStatus = document.getElementById("render-status");
 
-const DATA_VERSION = "20260316-10";
+const DATA_VERSION = "20260323-2";
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -29,7 +29,7 @@ const VIEW_KEYS = {
 
 const FILES = {
   worldOutline: "data/world.geojson",
-  worldCities: "data/world_cities.geojson",
+  worldCities: ["data/world_cities_zh.json", "data/world_cities.geojson"],
   china: ["data/china_adm3.geojson", "data/taiwan_adm1.geojson", "data/hk_mac_subunits.geojson"],
 };
 
@@ -129,14 +129,23 @@ async function loadSingle(key) {
   if (dataCache[key]) return;
   const fileDef = FILES[key];
   if (Array.isArray(fileDef)) {
-    const collections = [];
-    for (const url of fileDef) {
-      const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
-      if (!response.ok) continue;
-      collections.push(await response.json());
-    }
-    if (collections.length > 0) {
-      dataCache[key] = mergeCollections(collections);
+    if (key === "china") {
+      const collections = [];
+      for (const url of fileDef) {
+        const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
+        if (!response.ok) continue;
+        collections.push(await response.json());
+      }
+      if (collections.length > 0) {
+        dataCache[key] = mergeCollections(collections);
+      }
+    } else {
+      for (const url of fileDef) {
+        const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
+        if (!response.ok) continue;
+        dataCache[key] = await response.json();
+        break;
+      }
     }
   } else {
     const response = await fetch(`${fileDef}?v=${DATA_VERSION}`, { cache: "no-store" });
@@ -223,7 +232,8 @@ function renderChina(token) {
       index += 1;
       if (!feature.geometry) continue;
       normalizeFeatureName(feature);
-      const name = feature.properties?.[normalizeMatchKey()] || feature.properties?.name;
+      const props = feature.properties || {};
+      const name = props[normalizeMatchKey()] || props.name;
       if (!name) continue;
 
       total += 1;
@@ -234,12 +244,30 @@ function renderChina(token) {
       path.setAttribute("d", pathData);
       path.classList.add("map-path");
       if (visited.has(name)) path.classList.add("visited");
+      const cityKey = getChinaCityKey(props);
+      const isDistrict = isChinaDistrict(props, name);
       path.dataset.name = name;
+      path.dataset.cityKey = cityKey || "";
+      path.dataset.isDistrict = isDistrict ? "1" : "0";
       path.dataset.bbox = JSON.stringify(computeProjectedBounds(feature, bounds, scale, viewBox));
-      path.addEventListener("click", () => toggleVisited(name, path));
+      path.addEventListener("click", () => {
+        if (isDistrict && cityKey) {
+          toggleChinaCityDistricts(cityKey);
+          renderSearchResults();
+        } else {
+          toggleVisited(name, path);
+          renderSearchResults();
+        }
+      });
       fragment.appendChild(path);
       chinaPathByName.set(name, path);
-      chinaItems.push({ name, aliases: collectAliases(feature, name) });
+      chinaItems.push({
+        name,
+        aliases: collectAliases(feature, name),
+        cityKey,
+        isDistrict,
+        path,
+      });
       added += 1;
     }
     svg.appendChild(fragment);
@@ -358,6 +386,14 @@ function handleSearch() {
 
   if (activeView === "china") {
     const normalized = normalizeKey(query);
+    const cityMatch = chinaItems.find(
+      (item) => item.isDistrict && item.cityKey && normalizeKey(item.cityKey).includes(normalized)
+    );
+    if (cityMatch) {
+      toggleChinaCityDistricts(cityMatch.cityKey);
+      renderSearchResults();
+      return;
+    }
     const match = chinaItems.find((item) =>
       item.aliases.some((alias) => normalizeKey(alias).includes(normalized))
     );
@@ -365,8 +401,13 @@ function handleSearch() {
       alert("没有找到匹配的名称，请检查匹配字段。");
       return;
     }
-    const path = chinaPathByName.get(match.name);
-    if (path) toggleVisited(match.name, path);
+    if (match.isDistrict && match.cityKey) {
+      toggleChinaCityDistricts(match.cityKey);
+    } else {
+      const path = match.path || chinaPathByName.get(match.name);
+      if (path) toggleVisited(match.name, path);
+    }
+    renderSearchResults();
     return;
   }
 
@@ -407,17 +448,22 @@ function worldCityScan(query, autoMark) {
       index += 1;
       if (!feature.geometry) continue;
       normalizeFeatureName(feature);
-      const name = feature.properties?.name;
-      if (!name) continue;
-      if (!normalizeKey(name).includes(normalized)) continue;
-
       const props = feature.properties || {};
+      const displayName = getWorldDisplayName(props);
+      if (!displayName) continue;
+      const aliases = collectWorldAliases(props, displayName);
+      if (!aliases.some((alias) => normalizeKey(alias).includes(normalized))) continue;
+
       const coords = feature.geometry?.coordinates || [];
       matches.push({
-        name,
-        iso: props.iso_a2 || "",
-        country: props.adm0name || "",
-        pop: Number(props.pop_max) || 0,
+        id: props.geonameid || props.id || props.GEONAMEID || "",
+        name: displayName,
+        name_en: cleanName(props.name_en) || cleanName(props.NAME_EN) || cleanName(props.name),
+        name_zh: cleanName(props.name_zh) || cleanName(props.NAME_ZH),
+        country: cleanName(props.country) || cleanName(props.adm0name),
+        country_zh: cleanName(props.country_zh) || cleanName(props.NAME_ZH),
+        iso: props.iso_a2 || props.iso || props.countryCode || "",
+        pop: Number(props.pop_max || props.pop || props.population) || 0,
         coords,
       });
       added += 1;
@@ -509,6 +555,7 @@ function renderWorldResults(items, autoMark) {
 }
 
 function getWorldCityKey(item) {
+  if (item.id) return `id:${item.id}`;
   const lon = Number(item.coords?.[0]);
   const lat = Number(item.coords?.[1]);
   const lonKey = Number.isFinite(lon) ? lon.toFixed(4) : "0";
@@ -523,7 +570,7 @@ function isWorldVisited(visitedSet, legacyName, key) {
 }
 
 function formatWorldLabel(item) {
-  const suffix = item.country || item.iso;
+  const suffix = item.country_zh || item.country || item.iso;
   if (!suffix) return item.name;
   return `${item.name} · ${suffix}`;
 }
@@ -532,19 +579,106 @@ function normalizeFeatureName(feature) {
   if (!feature.properties) feature.properties = {};
   if (feature.properties.name) return;
   const fallback =
-    feature.properties.shapeName ||
-    feature.properties.NAME ||
-    feature.properties.NAME_EN ||
-    feature.properties.name_en ||
-    feature.properties.admin ||
-    feature.properties.NAME_LONG ||
-    feature.properties.NAME_LOCAL;
+    cleanName(feature.properties.NL_NAME_3) ||
+    cleanName(feature.properties.NAME_3) ||
+    cleanName(feature.properties.shapeName) ||
+    cleanName(feature.properties.NAME) ||
+    cleanName(feature.properties.NAME_EN) ||
+    cleanName(feature.properties.name_en) ||
+    cleanName(feature.properties.admin) ||
+    cleanName(feature.properties.NAME_LONG) ||
+    cleanName(feature.properties.NAME_LOCAL);
   if (fallback) feature.properties.name = fallback;
 }
 
 function normalizeKey(value) {
   if (!value) return "";
   return value.toString().trim().toLowerCase().replace(/[\\s\\u00A0]+/g, "").replace(/[\\-_.'"]/g, "");
+}
+
+function cleanName(value) {
+  if (value === undefined || value === null) return "";
+  const text = value.toString().trim();
+  if (!text || text.toUpperCase() === "NA") return "";
+  return text;
+}
+
+function getWorldDisplayName(props) {
+  return (
+    cleanName(props.name_zh) ||
+    cleanName(props.NAME_ZH) ||
+    cleanName(props.name) ||
+    cleanName(props.name_en) ||
+    cleanName(props.NAME_EN)
+  );
+}
+
+function collectWorldAliases(props, displayName) {
+  const aliases = new Set();
+  const keys = [
+    "name_zh",
+    "NAME_ZH",
+    "name",
+    "name_en",
+    "NAME_EN",
+    "nameascii",
+    "NAMEASCII",
+    "ascii",
+    "alternatenames",
+  ];
+  if (displayName) aliases.add(displayName);
+  for (const key of keys) {
+    const value = cleanName(props[key]);
+    if (!value) continue;
+    if (value.includes(",")) {
+      value
+        .split(",")
+        .map((item) => cleanName(item))
+        .filter(Boolean)
+        .forEach((item) => aliases.add(item));
+    } else {
+      aliases.add(value);
+    }
+  }
+  const countryZh = cleanName(props.country_zh) || cleanName(props.NAME_ZH);
+  if (countryZh) aliases.add(countryZh);
+  return [...aliases];
+}
+
+function getChinaCityKey(props) {
+  return (
+    cleanName(props.NL_NAME_2) ||
+    cleanName(props.NAME_2) ||
+    cleanName(props.NL_NAME_1) ||
+    cleanName(props.NAME_1)
+  );
+}
+
+function isChinaDistrict(props, name) {
+  const typeEn = cleanName(props.ENGTYPE_3).toLowerCase();
+  if (typeEn.includes("district")) return true;
+  const localName = cleanName(props.NL_NAME_3) || cleanName(props.NAME_3) || name || "";
+  return localName.endsWith("区");
+}
+
+function toggleChinaCityDistricts(cityKey) {
+  const visitedSet = getVisitedSet();
+  const targets = chinaItems.filter((item) => item.cityKey === cityKey && item.isDistrict);
+  if (!targets.length) return;
+  const shouldAdd = targets.some((item) => !visitedSet.has(item.name));
+  for (const item of targets) {
+    const path = item.path || chinaPathByName.get(item.name);
+    if (!path) continue;
+    if (shouldAdd) {
+      visitedSet.add(item.name);
+      path.classList.add("visited");
+    } else {
+      visitedSet.delete(item.name);
+      path.classList.remove("visited");
+    }
+  }
+  setVisitedSet(visitedSet);
+  updateStats(parseInt(countTotal.textContent, 10), visitedSet.size);
 }
 
 function collectAliases(feature, name) {
@@ -566,9 +700,17 @@ function collectAliases(feature, name) {
     "NAME_ZH_HANT",
     "chinese",
     "CHINESE",
+    "NAME_1",
+    "NAME_2",
+    "NAME_3",
+    "NL_NAME_1",
+    "NL_NAME_2",
+    "NL_NAME_3",
+    "VARNAME_3",
   ];
   for (const key of keys) {
-    if (props[key]) aliases.add(props[key]);
+    const value = cleanName(props[key]);
+    if (value) aliases.add(value);
   }
   for (const item of [...aliases]) {
     const mapped = ALIAS_MAP.get(item);
