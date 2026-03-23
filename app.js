@@ -26,10 +26,12 @@ const authSyncBtn = document.getElementById("auth-sync");
 const authSignOutBtn = document.getElementById("auth-signout");
 const authStatus = document.getElementById("auth-status");
 
-const DATA_VERSION = "20260323-5";
+const DATA_VERSION = "20260323-6";
 const SUPABASE_URL = "https://gmmvwnrqkwbxdqishreb.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_3o3hYeHXEbVeji8ZQtOvIg_Z4JJxsY6";
 const SUPABASE_REDIRECT_URL = "https://fangzaozao.github.io/travel-map/";
+const PROJECT_BASE = window.location.hostname.endsWith("github.io") ? "/travel-map/" : "/";
+const BASE_URL = `${window.location.origin}${PROJECT_BASE}`;
 const VIEW_KEYS = {
   world: "travel-map-world",
   china: "travel-map-china",
@@ -153,7 +155,7 @@ async function loadSingle(key) {
     if (key === "china") {
       const collections = [];
       for (const url of fileDef) {
-        const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
+        const response = await fetch(`${resolveUrl(url)}?v=${DATA_VERSION}`, { cache: "no-store" });
         if (!response.ok) continue;
         collections.push(await response.json());
       }
@@ -162,14 +164,14 @@ async function loadSingle(key) {
       }
     } else {
       for (const url of fileDef) {
-        const response = await fetch(`${url}?v=${DATA_VERSION}`, { cache: "no-store" });
+        const response = await fetch(`${resolveUrl(url)}?v=${DATA_VERSION}`, { cache: "no-store" });
         if (!response.ok) continue;
         dataCache[key] = await response.json();
         break;
       }
     }
   } else {
-    const response = await fetch(`${fileDef}?v=${DATA_VERSION}`, { cache: "no-store" });
+    const response = await fetch(`${resolveUrl(fileDef)}?v=${DATA_VERSION}`, { cache: "no-store" });
     if (!response.ok) return;
     dataCache[key] = await response.json();
   }
@@ -188,6 +190,14 @@ function render() {
     renderWorld(token);
   } else {
     renderChina(token);
+  }
+}
+
+function resolveUrl(relativePath) {
+  try {
+    return new URL(relativePath, BASE_URL).toString();
+  } catch {
+    return relativePath;
   }
 }
 
