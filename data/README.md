@@ -16,13 +16,12 @@
 - `NAME_2`
 - `adm2_name`
 
-当前中国县级数据使用 GADM v4.1 ADM3（CHN），包含地级市字段：
-- `NAME_2`（地级市英文）
-- `NL_NAME_2`（地级市中文）
-- `NAME_3` / `NL_NAME_3`（县区）
-- `ENGTYPE_3` / `TYPE_3`（县区类型：District / County / CountyCity 等）
+当前中国县级数据使用 DataV.GeoAtlas 的区县级边界，来自 ChinaGeoJson 数据集：
+- 数据来源：阿里云 DataV.GeoAtlas
+- 包含 `info.json` 的行政层级信息与 `county` 的区县边界数据
+- 已转换为 `data/china_adm3.geojson`
 
-注意：GADM 数据有使用许可限制，使用前请确认许可条款。
+注意：数据许可与使用限制请参考数据源说明。
 
 世界城市中文检索数据：
 - 可选使用 `data/world_cities_zh.json`，包含中文城市名与国家名

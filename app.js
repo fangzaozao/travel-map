@@ -26,7 +26,7 @@ const authSyncBtn = document.getElementById("auth-sync");
 const authSignOutBtn = document.getElementById("auth-signout");
 const authStatus = document.getElementById("auth-status");
 
-const DATA_VERSION = "20260323-7";
+const DATA_VERSION = "20260325-2";
 const SUPABASE_URL = "https://gmmvwnrqkwbxdqishreb.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_3o3hYeHXEbVeji8ZQtOvIg_Z4JJxsY6";
 const SUPABASE_REDIRECT_URL = "https://fangzaozao.github.io/travel-map/";
@@ -45,7 +45,11 @@ const VIEW_KEYS = {
 const FILES = {
   worldOutline: "data/world.geojson",
   worldCities: ["data/world_cities_zh.json", "data/world_cities.geojson"],
-  china: ["data/china_adm3.geojson", "data/taiwan_adm1.geojson", "data/hk_mac_subunits.geojson"],
+  china: [
+    "data/china_adm3.geojson",
+    "data/taiwan_adm1.geojson",
+    "data/hk_mac_subunits.geojson",
+  ],
 };
 
 let activeView = "world";
